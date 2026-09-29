@@ -820,6 +820,7 @@ final class RuntimeCoordinator: NSObject {
     func surfaceContents(for o: CanvasObject, pixels: Double) -> Any? {
         let src = o.props.liveOf ?? o.id
         if let pb = liveBuffers[src], let surf = CVPixelBufferGetIOSurface(pb) { return surf.takeUnretainedValue() }
+        if let surf = app.collab?.remoteSurface(src) { return surf }
         if let so = o.props.liveOf.flatMap({ ws.object($0) }) { return surfaceImage(for: so, pixels: pixels) ?? app.images.image(o.props.assetID, pixels: pixels) }
         return surfaceImage(for: o, pixels: pixels)
     }
@@ -832,7 +833,7 @@ final class RuntimeCoordinator: NSObject {
         let surf = CVPixelBufferGetIOSurface(pb)?.takeUnretainedValue()
         let views = ws.live.filter { $0.props.liveOf == id }.map(\.id)
         for c in app.canvases { c.renderer.setLiveContents(surf, for: [id] + views) }
-        app.collab?.surfaceFrame(for: id) { [weak self] in self?.liveImage(id) }
+        app.collab?.surfaceVideo(pb, for: id)
     }
 
     func didReceiveFrame(_ img: CGImage, for id: ObjectID) {

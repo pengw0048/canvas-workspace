@@ -72,7 +72,12 @@ recorded here with evidence.
 - A host shares a scope and exposes a listener; participants join with an invite code that derives
   the TLS PSK. Bonjour advertises on the local network.
 - Channels on one connection: Automerge sync messages, asset requests (served only for assets
-  referenced by that scope), ephemeral presence, live surface frames, and control messages.
+  referenced by that scope), ephemeral presence, live surface video, and control messages.
+- Live surfaces stream as hardware H.264 (VideoToolbox), as video calls do: real-time rate control,
+  no frame reordering, keyframes with parameter sets on request, and bitrate adapted to the slowest
+  member. A member whose sends back up skips frames until the next keyframe. Members decode into
+  IOSurface-backed buffers that layers show directly. The video rides the same TLS/TCP connection;
+  UDP with SRTP and loss-tolerant pacing, as WebRTC uses, is the next step for lossy networks.
 - Remote control uses session-bound grants with a monotonically increasing generation. The host
   rejects events carrying an old generation, clears held keys/buttons on every transfer, and
   verifies the target window family before posting each event.

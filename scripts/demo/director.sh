@@ -52,6 +52,7 @@ h present on >/dev/null; h focus >/dev/null; h fit >/dev/null; sleep 3
 fresh=$(m remoteframes | python3 -c "import json,sys; f=json.load(sys.stdin)['frames']; print(sum(1 for i in '$TERM $NUM $KEY'.split() if f.get(i, 99) < 3))")
 (( fresh == 3 )) || { echo "Maya is not receiving live frames for all windows ($fresh of 3)"; exit 1; }
 
+[[ -n ${SETUP_ONLY:-} ]] && { echo "setup done"; exit 0; }
 wpt() { h state | python3 -c "import json,sys; o=[o for o in json.load(sys.stdin)['objects'] if o['id']=='$1'][0]; print(o['x']+o['w']*$2, o['y']+o['h']*$3)"; }
 MPX=-500; MPY=-420; m pointer $MPX $MPY >/dev/null
 mxy() { m glide $MPX $MPY $1 $2 ${3:-0.8} >/dev/null; MPX=$1; MPY=$2; }

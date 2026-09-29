@@ -430,7 +430,9 @@ final class Automation {
                 app.collab?.toggleLiveShare(args[0])
                 return json(["live": app.collab?.liveShared.contains(args[0]) ?? false])
             case "remoteframes":
-                return json(["frames": app.collab?.remoteFrames.mapValues { Date().timeIntervalSince($0.1) } ?? [:]])
+                let ids = Set((app.collab?.remoteFrames.keys.map { $0 } ?? []) + (app.collab?.remoteBuffers.keys.map { $0 } ?? []))
+                return json(["frames": Dictionary(uniqueKeysWithValues: ids.compactMap { id in app.collab?.remoteFrameAge(id).map { (id, $0) } }),
+                             "bitrates": app.collab?.encoders.mapValues(\.bitrate) ?? [:]])
             case "setrole":
                 app.collab?.setRole(args[0], viewOnly: args[1] == "view")
                 return json(["ok": true])

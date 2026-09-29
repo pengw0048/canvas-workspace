@@ -68,6 +68,8 @@ final class Peer {
     var uploadedAssets: Set<AssetID> = []
     var sync: [ScopeID: SyncState] = [:]
     var pendingSends = 0
+    /// Host side: streams this member dropped frames of; it waits for the next keyframe.
+    var videoBroken: Set<ObjectID> = []
     var onMessage: ((Peer, WireMessage) -> Void)?
     var onClose: ((Peer) -> Void)?
     var closed = false
@@ -130,6 +132,13 @@ final class Collaboration: NSObject {
     var arbiters: [ObjectID: ControlArbiter] = [:]
     var liveShared: Set<ObjectID> = []
     var lastFrameSent: [ObjectID: Date] = [:]
+    var encoders: [ObjectID: H264Encoder] = [:]
+    var decoders: [ObjectID: H264Decoder] = [:]
+    var remoteBuffers: [ObjectID: (CVPixelBuffer, Date)] = [:]
+    var remoteStill: [ObjectID: (CVPixelBuffer, CGImage)] = [:]
+    var videoCongested: Set<ObjectID> = []
+    var lastAdapt: [ObjectID: Date] = [:]
+    var lastKeyRequest: [ObjectID: Date] = [:]
     var lastInjection = Date.distantPast
     var reclaimTimer: Timer?
     // Participant side
@@ -226,7 +235,18 @@ final class Collaboration: NSObject {
     func isRemoteObject(_ o: CanvasObject) -> Bool { shares[o.scope].map { !$0.hosted } ?? false }
     func isRemoteSurface(_ o: CanvasObject) -> Bool { [.app, .browser].contains(o.kind) && isRemoteObject(o) && o.props.browserMode != .providerDocument && !(o.kind == .browser && o.props.browserMode == .reference) }
     func isPublishingLive(_ id: ObjectID) -> Bool { liveShared.contains(id) }
-    func remoteFrame(_ id: ObjectID) -> CGImage? { remoteFrames[id]?.0 }
+    /// A still of the latest remote frame (thumbnails, copy as image).
+    func remoteFrame(_ id: ObjectID) -> CGImage? {
+        guard let (pb, _) = remoteBuffers[id] else { return remoteFrames[id]?.0 }
+        if let c = remoteStill[id], c.0 === pb { return c.1 }
+        let ci = CIImage(cvPixelBuffer: pb)
+        guard let img = CIContext().createCGImage(ci, from: ci.extent) else { return nil }
+        remoteStill[id] = (pb, img)
+        return img
+    }
+    func remoteFrameAge(_ id: ObjectID) -> TimeInterval? {
+        [remoteBuffers[id]?.1, remoteFrames[id]?.1].compactMap { $0 }.max().map { Date().timeIntervalSince($0) }
+    }
 
     func controllerLabel(_ id: ObjectID) -> String? {
         if let a = arbiters[id], let c = a.controller { return c == me ? "you control" : "\(name(of: c) ?? "a collaborator") controls" }
@@ -251,7 +271,7 @@ final class Collaboration: NSObject {
         }
         if let g = myGrants[o.id], g > 0 { return SurfaceStatus(text: "You control · ⌃⌥Space releases", tone: .live) }
         if let c = controllers[o.id] { return SurfaceStatus(text: "\(name(of: c) ?? "Someone") controls", tone: .live) }
-        if let f = remoteFrames[o.id], Date().timeIntervalSince(f.1) < 3 { return SurfaceStatus(text: "Live from host", tone: .live) }
+        if let a = remoteFrameAge(o.id), a < 3 { return SurfaceStatus(text: "Live from host", tone: .live) }
         if let t = o.props.previewTime { return SurfaceStatus(text: "Shared visual from \(app.runtime.relative(Date(timeIntervalSince1970: t)))", tone: .normal) }
         return SurfaceStatus(text: "Shared visual", tone: .normal)
     }
@@ -320,6 +340,7 @@ final class Collaboration: NSObject {
                     tx.update(id) { $0.deleted = true }
                 }
                 liveShared.remove(id)
+                encoders[id] = nil
             }
         } catch { app.report(error) }
     }
@@ -426,6 +447,8 @@ final class Collaboration: NSObject {
 
     func hostReceive(_ p: Peer, _ m: WireMessage) {
         switch m.type {
+        case "keyreq":
+            if let o = m["o"], let obj = ws.object(o), p.scopes.contains(obj.scope) { encoders[o]?.requestKeyframe() }
         case "hello":
             guard let u = m["user"], let n = m["name"] else { p.close(); return }
             // The TLS key proved the invite code of exactly one share; only that share is granted.
@@ -808,6 +831,7 @@ final class Collaboration: NSObject {
         }
         if liveShared.contains(id) {
             liveShared.remove(id)
+            encoders[id] = nil
             if o.kind == .app, app.runtime.isLive(id) { app.runtime.toggleLive(id) }
         } else {
             liveShared.insert(id)
@@ -818,33 +842,83 @@ final class Collaboration: NSObject {
         refreshUI()
     }
 
-    /// Publishes a live frame to members of the object's scope only.
-    func surfaceFrame(_ img: CGImage, for id: ObjectID) { surfaceFrame(for: id) { img } }
-
-    /// Publishes a live frame; the image is only produced when a frame is actually due.
-    func surfaceFrame(for id: ObjectID, make: () -> CGImage?) {
-        guard liveShared.contains(id), let o = ws.object(id), shares[o.scope]?.hosted == true else { return }
-        if let t = lastFrameSent[id], Date().timeIntervalSince(t) < 1.0 / 15 { return }
-        guard peers.contains(where: { $0.scopes.contains(o.scope) }), let img = make() else { return }
-        lastFrameSent[id] = Date()
-        // JPEG has no alpha: flatten onto white so window corners do not turn black.
-        var src = img
-        let s = min(1, 1600.0 / Double(img.width))
-        if let ctx = CGContext(data: nil, width: Int(Double(img.width) * s), height: Int(Double(img.height) * s), bitsPerComponent: 8, bytesPerRow: 0,
-                               space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) {
-            ctx.setFillColor(.white)
-            ctx.fill(CGRect(x: 0, y: 0, width: ctx.width, height: ctx.height))
-            ctx.draw(img, in: CGRect(x: 0, y: 0, width: ctx.width, height: ctx.height))
-            src = ctx.makeImage() ?? img
-        }
-        guard let jpeg = NSBitmapImageRep(cgImage: src).representation(using: .jpeg, properties: [.compressionFactor: 0.6]) else { return }
-        let m = WireMessage("frame", ["o": id, "time": "\(Date().timeIntervalSince1970)"], payload: jpeg)
-        for p in peers where p.scopes.contains(o.scope) && p.pendingSends < 6 { p.send(m) }
+    /// Publishes a still frame (browser snapshots) through the same video stream.
+    func surfaceFrame(_ img: CGImage, for id: ObjectID) {
+        guard liveShared.contains(id), let pb = PixelBuffers.make(from: img) else { return }
+        surfaceVideo(pb, for: id)
     }
+
+    /// Streams a shared window to members of its scope as H.264, like a video call:
+    /// keyframes on request, and a congested member skips frames until the next keyframe.
+    func surfaceVideo(_ pb: CVPixelBuffer, for id: ObjectID) {
+        guard liveShared.contains(id), let o = ws.object(id), shares[o.scope]?.hosted == true,
+              peers.contains(where: { $0.scopes.contains(o.scope) }) else { return }
+        if let t = lastFrameSent[id], Date().timeIntervalSince(t) < 1.0 / 30 { return }
+        lastFrameSent[id] = Date()
+        let enc = encoders[id] ?? {
+            let e = H264Encoder()
+            e.onPacket = { [weak self] packet in self?.sendVideo(packet, for: id) }
+            encoders[id] = e
+            return e
+        }()
+        enc.encode(pb)
+    }
+
+    func sendVideo(_ packet: VideoPacket, for id: ObjectID) {
+        guard let o = ws.object(id), let enc = encoders[id] else { return }
+        let m = WireMessage("vframe", ["o": id, "k": packet.keyframe ? "1" : "0", "w": "\(packet.width)", "h": "\(packet.height)"], payload: packet.payload())
+        var congested = false
+        for p in peers where p.scopes.contains(o.scope) {
+            if p.pendingSends >= 4 { congested = true; p.videoBroken.insert(id); continue }
+            if p.videoBroken.contains(id) {
+                guard packet.keyframe else { enc.requestKeyframe(); continue }
+                p.videoBroken.remove(id)
+            }
+            p.send(m)
+        }
+        // About once a second, move the bitrate toward what the slowest member can take.
+        if congested { videoCongested.insert(id) }
+        if Date().timeIntervalSince(lastAdapt[id] ?? .distantPast) > 1 {
+            enc.adapt(congested: videoCongested.contains(id))
+            videoCongested.remove(id)
+            lastAdapt[id] = Date()
+        }
+    }
+
+    /// Member side: decodes a shared window's stream straight into a displayable surface.
+    func receiveVideo(_ m: WireMessage) {
+        guard let o = m["o"], let packet = VideoPacket(header: m.header, payload: m.payload) else { return }
+        let dec = decoders[o] ?? {
+            let d = H264Decoder()
+            d.onFrame = { [weak self] pb in self?.showRemote(pb, for: o) }
+            d.onNeedKeyframe = { [weak self] in
+                guard let self, Date().timeIntervalSince(self.lastKeyRequest[o] ?? .distantPast) > 0.5 else { return }
+                self.lastKeyRequest[o] = Date()
+                self.upstream?.send(WireMessage("keyreq", ["o": o]))
+            }
+            decoders[o] = d
+            return d
+        }()
+        dec.decode(packet)
+    }
+
+    func showRemote(_ pb: CVPixelBuffer, for o: ObjectID) {
+        let first = remoteBuffers[o] == nil
+        remoteBuffers[o] = (pb, Date())
+        let views = ws.live.filter { $0.props.liveOf == o }.map(\.id)
+        for c in app.canvases {
+            if first { c.renderer.refreshSurface(o, ws); for v in views { c.renderer.refreshSurface(v, ws) } }
+            c.renderer.setLiveContents(CVPixelBufferGetIOSurface(pb)?.takeUnretainedValue(), for: [o] + views)
+        }
+    }
+
+    /// The latest decoded frame as a surface for layers.
+    func remoteSurface(_ id: ObjectID) -> IOSurface? { remoteBuffers[id].flatMap { CVPixelBufferGetIOSurface($0.0)?.takeUnretainedValue() } }
 
     func runtimeLost(_ id: ObjectID) {
         if arbiters[id]?.controller != nil { reclaim(id, reason: "The application window closed") }
         liveShared.remove(id)
+        encoders[id] = nil
     }
 
     func localActivity(on id: ObjectID) {
@@ -972,6 +1046,8 @@ final class Collaboration: NSObject {
             if let a = m["id"] { requestedAssets.remove(a) }
         case "presence":
             if let u = m["u"] { updatePresence(from: m, user: u) }
+        case "vframe":
+            receiveVideo(m)
         case "frame":
             guard let o = m["o"], let img = NSImage(data: m.payload)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
             remoteFrames[o] = (img, Date())
