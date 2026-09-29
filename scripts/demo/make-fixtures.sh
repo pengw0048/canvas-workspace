@@ -3,7 +3,7 @@
 set -e
 d=$1; mkdir -p $d
 cat > $d/research.html <<'HTML'
-<!doctype html><html><head><title>Cache rollout — engineering notes</title><style>
+<!doctype html><html><head><meta charset="utf-8"><title>Cache rollout — engineering notes</title><style>
 body{font:20px -apple-system;margin:0;background:#fafafa;color:#1d1d1f}
 header{background:linear-gradient(120deg,#0b84f3,#6e56cf);color:white;padding:36px 48px}
 h1{margin:0;font-size:38px} .sub{opacity:.85;margin-top:8px}

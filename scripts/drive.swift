@@ -1,5 +1,5 @@
 // Posts real input events for acceptance runs. Requires Accessibility.
-// drive click X Y | drag X1 Y1 X2 Y2 | type TEXT | key CODE [cmd,shift,opt,ctrl] | front | pos
+// drive click X Y | drag X1 Y1 X2 Y2 | type TEXT | keys MS TEXT | hover X Y | key CODE [cmd,shift,opt,ctrl] | front | pos
 import AppKit
 let a = CommandLine.arguments
 let src = CGEventSource(stateID: .hidSystemState)
@@ -40,8 +40,25 @@ case "type":
 case "key":
     let code = CGKeyCode(Int(a[2])!), f = a.count > 3 ? flags(a[3]) : []
     for down in [true, false] { let e = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: down); e?.flags = f; post(e) }
+case "keys":
+    // US key codes with a delay between keys, for apps that ignore Unicode-string events (Terminal).
+    let codes: [Character: CGKeyCode] = ["a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9, "b": 11, "q": 12,
+        "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "o": 31, "u": 32, "i": 34, "p": 35, "l": 37, "j": 38, "k": 40, "n": 45, "m": 46,
+        "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23, "9": 25, "7": 26, "8": 28, "0": 29, "-": 27, "=": 24, ".": 47, ",": 43, "/": 44, " ": 49]
+    let ms = UInt32(a[2])!
+    for ch in a[3...].joined(separator: " ") {
+        guard let code = codes[ch] else { continue }
+        for down in [true, false] { post(CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: down)) }
+        usleep(ms * 1000)
+    }
+case "hover":
+    // Moves the pointer without pressing, over about half a second.
+    let p0 = CGEvent(source: nil)?.location ?? .zero, p1 = CGPoint(x: Double(a[2])!, y: Double(a[3])!)
+    for i in 1...30 { let t = Double(i) / 30, e = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+        mouse(.mouseMoved, CGPoint(x: p0.x + (p1.x - p0.x) * e, y: p0.y + (p1.y - p0.y) * e)); usleep(4_000) }
 case "front":
-    print(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?")
+    let f = NSWorkspace.shared.frontmostApplication
+    print(a.count > 2 ? "\(f?.processIdentifier ?? 0)" : f?.localizedName ?? "?")
 case "pos":
     print(CGEvent(source: nil)?.location ?? .zero)
 default: print("unknown")
