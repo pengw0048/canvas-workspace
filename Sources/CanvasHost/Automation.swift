@@ -435,6 +435,9 @@ final class Automation {
             case "depth":
                 guard let o = ws.object(args[0]) else { return json(["error": "missing"]) }
                 return json(["achieved": app.runtime.achievedDepth[o.id]?.rawValue ?? "", "available": app.runtime.recoveryDepth(o).rawValue])
+            case "revealsource":
+                app.revealSource(of: args[0], in: c)
+                return json(["ok": true])
             case "identity":
                 return json(["id": app.identity.id, "name": app.identity.name])
             case "flush":

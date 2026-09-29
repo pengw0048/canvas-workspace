@@ -4,7 +4,8 @@ Status as of 2026-09-29. Test profile: one MacBook Pro (Apple M4 Max, 64 GB), ma
 built-in display at 2× scale, Swift 6.4 Command Line Tools. Fixture applications: TextEdit
 (system), the host's embedded WebKit browser. All fixtures are non-sensitive local files.
 
-The product is **not complete**. The §7.2 native gate now passes for activation, 1:1 placement,
+The product is **not complete**, but the principal acceptance session (E2E-12) now passes on this
+Mac with the limitations listed in its section. The §7.2 native gate now passes for activation, 1:1 placement,
 typing and saving in a real app, app menus, a save sheet above the canvas, return by hot key and
 by canvas click, exit restoration, and reconnection after host restart. Native drag in both
 directions, IME, a second unrelated app, display changes, and remote control of native apps are
@@ -30,6 +31,27 @@ exercised end to end. **Simulated** — exercised, but with a stand-in noted in 
 | Mixed selection copied to the system clipboard, read back by a separate process as PNG | [evidence/clipboard-composition.png](evidence/clipboard-composition.png) |
 | Invariant tests (17): merge, atomic moves, undo conflicts, tombstones, crash-safe storage, asset durability, publication, copy semantics, connectors, frames, splices | `swift test` |
 | Automation transcript commands used below | `scripts/cw.sh`, `Sources/CanvasHost/Automation.swift` |
+
+## E2E-12 continuous deliverable session
+
+Run once, without pauses, in one notified input window (host full-display, colleague as a second
+process). Fixtures: a local research page, `data.txt` and `final.rtf` in TextEdit.
+
+| Step | Result |
+| --- | --- |
+| Research: reference page and a native data document on the canvas; region captures of both | Done; captures placed beside their sources. |
+| Compose: frame with the two captures, an explanation note, and an arrow; share the frame | Colleague received exactly the frame's objects. |
+| Collaborate on the note | Host and colleague edited from the same base at the same time; both edits survived on both sides. |
+| Hand control of the ordinary app (TextEdit, `data.txt`) to the colleague | Colleague saw it live and typed a new data row into the real document; host reclaimed and saved it (the row is on disk). |
+| Paste into the real final document and save | Real ⌘C on the canvas, ⌘V in TextEdit; saved as `final.rtfd` with the annotated evidence image (2088×924). |
+| Leave | Real ⌘Q; TextEdit kept running with both documents; the colleague saw "Host offline · last update 1 min. ago". |
+| Upstream change, then resume | The research page was revised on disk. Relaunch: scene responding in 0.31 s, all 9 objects, both windows reconnected, colleague reconnected without any control grant, frozen captures unchanged (still "v1 … 17 ms"), the reference page now reads the revised "21 ms". |
+| Deliverable outside the workspace; revisit evidence | `textutil` reads `final.rtfd` and its image; Reveal source on the data capture moved the camera to the data surface. The context-menu path was shown (evidence) but the menu item was not located by the automation, so that step was driven by automation. |
+
+Evidence: [evidence/e2e12-resumed-scene.png](evidence/e2e12-resumed-scene.png) (frozen v1 capture next to
+the changed page, co-edited note, context menu), [evidence/e2e12-deliverable-graphic.png](evidence/e2e12-deliverable-graphic.png)
+(the image as stored in the deliverable). Limitations: one Mac and two processes, not two machines;
+the remote typing needed a click into the document first.
 
 ## Canvas and document (package B)
 
