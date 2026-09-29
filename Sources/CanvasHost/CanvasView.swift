@@ -84,6 +84,7 @@ final class CanvasView: NSView, SceneContext {
     let overlayFill = CAShapeLayer()
     let presenceLayer = CALayer()
     var minimap: MinimapView?
+    var facepile: FacepileView?
     var tool: Tool = .pointer { didSet { toolbar?.update(); window?.invalidateCursorRects(for: self); updateCursor() } }
     var selection: Set<ObjectID> = [] {
         didSet {
@@ -159,6 +160,10 @@ final class CanvasView: NSView, SceneContext {
         mm.isHidden = UserDefaults.standard.bool(forKey: "hideMinimap")
         addSubview(mm)
         minimap = mm
+        let fp = FacepileView(canvas: self)
+        fp.isHidden = true
+        addSubview(fp)
+        facepile = fp
         applyCamera()
     }
 
@@ -202,6 +207,7 @@ final class CanvasView: NSView, SceneContext {
         hud.frame = safe
         toolbar?.layoutIn(safe)
         minimap?.frame = NSRect(origin: CGPoint(x: safe.minX + 14, y: safe.maxY - MinimapView.size.height - 14), size: MinimapView.size)
+        layoutFacepile()
         minimap?.refreshObjects()
         editor?.reposition()
     }
@@ -548,15 +554,24 @@ final class CanvasView: NSView, SceneContext {
 
     // MARK: Presence
 
+    func layoutFacepile() {
+        guard let f = facepile else { return }
+        let safe = safeRect
+        f.frame.origin = CGPoint(x: safe.maxX - f.frame.width - 14, y: safe.minY + 10)
+        hud.statusTopInset = f.isHidden ? 0 : FacepileView.side + 12
+    }
+
     func updatePresence() {
         minimap?.refreshCursors()
+        facepile?.refresh()
+        layoutFacepile()
         presenceLayer.sublayers?.forEach { $0.removeFromSuperlayer() }
         // A participant shown picture-in-picture for a recording also draws its own automated pointer.
         if CommandLine.arguments.contains("--pip"), let lp = lastPointerWorld {
-            drawCursor(at: camera.toView(lp), name: app.identity.name, color: app.collab?.myColor ?? .systemPink, chat: chatText)
+            drawCursor(at: camera.toView(lp), name: nil, color: app.collab?.myColor ?? .systemPink, chat: chatText)
         } else if chatField == nil, let t = chatText, !t.isEmpty, let lp = lastPointerWorld {
             // A sent message stays beside the real pointer while collaborators still see it.
-            drawCursor(at: camera.toView(lp), name: app.identity.name, color: app.collab?.myColor ?? .systemPink, chat: t, arrow: false)
+            drawCursor(at: camera.toView(lp), name: nil, color: app.collab?.myColor ?? .systemPink, chat: t, arrow: false)
         }
         for (_, c) in remoteCursors {
             drawCursor(at: camera.toView(c.point), name: c.name, color: c.color, chat: c.chat)

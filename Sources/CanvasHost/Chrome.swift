@@ -114,6 +114,8 @@ final class ToolbarView: NSView {
 /// Status, hints, and the workspace menu. Passes clicks through except on its controls.
 final class HUDView: NSView {
     unowned let canvas: CanvasView
+    /// Room left above the status panel for the facepile.
+    var statusTopInset: CGFloat = 0 { didSet { if statusTopInset != oldValue { needsLayout = true } } }
     let menuButton: NSButton
     let statusPanel = makePanel()
     let statusLabel = NSTextField(labelWithString: "")
@@ -172,7 +174,7 @@ final class HUDView: NSView {
         statusLabel.sizeToFit()
         inputLabel.sizeToFit()
         let w = max(statusLabel.frame.width, inputLabel.frame.width) + 20
-        statusPanel.frame = NSRect(x: bounds.maxX - w - 14, y: 12, width: w, height: 42)
+        statusPanel.frame = NSRect(x: bounds.maxX - w - 14, y: 12 + statusTopInset, width: w, height: 42)
         inputLabel.frame = NSRect(x: 10, y: 4, width: w - 20, height: 16)
         statusLabel.frame = NSRect(x: 10, y: 21, width: w - 20, height: 16)
         hintLabel.sizeToFit()

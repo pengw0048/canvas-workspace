@@ -143,6 +143,14 @@ final class Collaboration: NSObject {
     // Both
     var presence: [String: Presence] = [:]
     var myColor = NSColor.systemPink
+
+    /// A fixed sRGB color per person, the same in every process and on every launch.
+    static func color(for userID: String) -> NSColor {
+        let palette: [UInt32] = [0xE5484D, 0x8E4EC6, 0x12A594, 0x3E63DD, 0xF76B15, 0xD6409F, 0x0090FF, 0x46A758]
+        let h = userID.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }
+        let c = palette[Int(h % UInt32(palette.count))]
+        return NSColor(srgbRed: CGFloat(c >> 16 & 0xFF) / 255, green: CGFloat(c >> 8 & 0xFF) / 255, blue: CGFloat(c & 0xFF) / 255, alpha: 1)
+    }
     var panel: CollaborationPanel?
     var presenceTimer: Timer?
     var lastPresenceSent = Date.distantPast
@@ -153,7 +161,7 @@ final class Collaboration: NSObject {
     init(app: AppController) {
         self.app = app
         super.init()
-        myColor = [NSColor.systemPink, .systemPurple, .systemTeal, .systemIndigo, .systemBrown][abs(app.identity.id.hashValue) % 5]
+        myColor = Self.color(for: app.identity.id)
         shares = app.session.store.records("share", as: ShareInfo.self)
         for (id, s) in shares where app.workspace.scopes[id] == nil { _ = s; shares[id] = nil }
         for (id, s) in shares where s.viewOnly { app.workspace.readOnlyScopes.insert(id) }

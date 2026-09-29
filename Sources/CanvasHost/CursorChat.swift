@@ -7,29 +7,40 @@ extension CanvasView: NSTextFieldDelegate {
 
     func startChat() {
         guard app.collab?.isConnected == true else { hud.flash("Cursor chat needs a shared workspace"); return }
-        chatField?.removeFromSuperview()
+        chatField?.superview?.removeFromSuperview()
         let p = lastPointerWorld.map { camera.toView($0) } ?? CGPoint(x: bounds.midX, y: bounds.midY)
+        // The field sits in a bubble styled like the one collaborators see.
+        let bubble = NSView(frame: NSRect(x: p.x + 10, y: p.y + 14, width: 140, height: 30))
+        bubble.wantsLayer = true
+        bubble.layer?.backgroundColor = (app.collab?.myColor ?? .systemPink).cgColor
+        bubble.layer?.cornerRadius = 12
+        bubble.shadow = NSShadow()
+        bubble.layer?.shadowOpacity = 0.25
+        bubble.layer?.shadowRadius = 6
+        bubble.layer?.shadowOffset = CGSize(width: 0, height: -2)
         let f = NSTextField(string: "")
-        f.placeholderString = "Say something"
-        f.font = .systemFont(ofSize: 13, weight: .medium)
+        f.font = Self.chatFont
+        f.placeholderAttributedString = NSAttributedString(string: "Say something", attributes: [.font: Self.chatFont, .foregroundColor: NSColor.white.withAlphaComponent(0.65)])
         f.isBordered = false
         f.focusRingType = .none
-        f.drawsBackground = true
-        f.backgroundColor = app.collab?.myColor ?? .systemPink
+        f.drawsBackground = false
         f.textColor = .white
-        f.wantsLayer = true
-        f.layer?.cornerRadius = 10
-        f.layer?.masksToBounds = true
-        f.frame = NSRect(x: p.x + 14, y: p.y + 14, width: 240, height: 24)
+        f.frame = NSRect(x: 10, y: 6, width: 120, height: 18)
         f.delegate = self
-        addSubview(f)
+        bubble.addSubview(f)
+        addSubview(bubble)
         window?.makeFirstResponder(f)
         chatField = f
         setChat("")
     }
 
+    static let chatFont = NSFont.systemFont(ofSize: 14, weight: .medium)
+
     func controlTextDidChange(_ n: Notification) {
-        guard let f = n.object as? NSTextField, f === chatField else { return }
+        guard let f = n.object as? NSTextField, f === chatField, let bubble = f.superview else { return }
+        let w = min(280, max(120, NSAttributedString(string: f.stringValue, attributes: [.font: Self.chatFont]).size().width + 12))
+        bubble.frame.size.width = w + 20
+        f.frame.size.width = w
         setChat(f.stringValue)
     }
 
@@ -53,12 +64,13 @@ extension CanvasView: NSTextFieldDelegate {
     }
 
     func endChat(keep: Bool) {
-        chatField?.removeFromSuperview()
+        chatField?.superview?.removeFromSuperview()
         chatField = nil
         window?.makeFirstResponder(self)
         if keep, let t = chatText, !t.isEmpty {
             chatClear?.invalidate()
             chatClear = Timer.scheduledTimer(withTimeInterval: Self.chatLinger, repeats: false) { [weak self] _ in self?.setChat(nil) }
+            updatePresence()
         } else if chatText != nil {
             chatClear?.invalidate()
             chatText = nil
@@ -69,7 +81,8 @@ extension CanvasView: NSTextFieldDelegate {
     }
 
     /// A cursor arrow plus a name pill; with chat text the pill grows into a speech bubble.
-    func drawCursor(at p: CGPoint, name: String, color: NSColor, chat: String?, arrow drawArrow: Bool = true) {
+    /// Your own cursor passes no name: you never see your own name.
+    func drawCursor(at p: CGPoint, name: String?, color: NSColor, chat: String?, arrow drawArrow: Bool = true) {
         let arrow = CAShapeLayer()
         let path = CGMutablePath()
         path.move(to: p)
@@ -82,11 +95,13 @@ extension CanvasView: NSTextFieldDelegate {
         arrow.strokeColor = NSColor.white.cgColor
         arrow.lineWidth = 1
         if drawArrow { presenceLayer.addSublayer(arrow) }
+        let chat = chat.flatMap { $0.isEmpty ? nil : $0 }
+        guard name != nil || chat != nil else { return }
         let label = TextLayer()
-        let text = NSMutableAttributedString(string: name, attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.white])
+        let text = NSMutableAttributedString(string: name ?? "", attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.white])
         var size = CGSize(width: text.size().width + 10, height: 17)
-        if let chat, !chat.isEmpty {
-            text.append(NSAttributedString(string: "\n" + chat, attributes: [.font: NSFont.systemFont(ofSize: 14, weight: .medium), .foregroundColor: NSColor.white]))
+        if let chat {
+            text.append(NSAttributedString(string: (name == nil ? "" : "\n") + chat, attributes: [.font: Self.chatFont, .foregroundColor: NSColor.white]))
             let r = text.boundingRect(with: CGSize(width: 260, height: 400), options: [.usesLineFragmentOrigin, .usesFontLeading])
             size = CGSize(width: ceil(r.width) + 20, height: ceil(r.height) + 12)
             label.inset = CGSize(width: 10, height: 6)

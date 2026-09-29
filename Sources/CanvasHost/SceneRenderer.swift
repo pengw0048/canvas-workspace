@@ -518,7 +518,8 @@ final class SceneRenderer {
         let active = context?.activeID == o.id
         let selected = context?.isSelected(o.id) ?? false
         let s = 1 / camera.zoom
-        if l.detail == .icon {
+        // Far away, a window still shows its picture; the icon card is only for windows without one.
+        if l.detail == .icon, context?.surfaceContents(for: o, pixels: pixelsNeeded(o)) == nil {
             configureSurface(l, o, size: size)
             return
         }
