@@ -276,8 +276,13 @@ final class Automation {
                 if args.count > 4 { e.text = args[4...].joined(separator: " ") }
                 if e.kind == .text { c.showKeys(e.text ?? "") }
                 if e.kind == .key {
-                    // input <id> key 0 0 <keyCode>: a full press and release.
-                    c.showKeys([36: "↩", 53: "esc", 48: "⇥"][Int(e.text ?? "") ?? 0] ?? "key")
+                    // input <id> key 0 0 <keyCode> [ctrl|cmd]: a full press and release.
+                    let parts = (e.text ?? "").split(separator: " ").map(String.init)
+                    let mod = parts.count > 1 ? parts[1] : ""
+                    e.flags = mod == "ctrl" ? CGEventFlags.maskControl.rawValue : mod == "cmd" ? CGEventFlags.maskCommand.rawValue : 0
+                    let code = Int(parts.first ?? "") ?? 36
+                    c.showKeys((mod == "ctrl" ? "⌃" : mod == "cmd" ? "⌘" : "") + ([36: "↩", 53: "esc", 48: "⇥", 8: "C"][code] ?? "key"))
+                    e.text = String(code)
                     e.keyCode = Int(e.text ?? "") ?? 36
                     e.text = nil
                     e.keyDown = true
