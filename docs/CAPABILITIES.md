@@ -75,14 +75,14 @@ exercised end to end. **Simulated** — exercised, but with a stand-in noted in 
 | Multiple displays with independent cameras | Unverified | One display on the test Mac. |
 | Transformed input into arbitrary windows at fractional scale | Unsupported | The hybrid strategy delivers input only to the real window at 1:1. |
 | Dirty-state detection for ordinary apps | Unsupported | Reported as unknown. |
-| App-specific session restoration adapters | Not implemented | |
+| Adapter session restoration | Unverified | A generic text-document adapter saves the document path, selection, and first visible character over AX while connected; on reopen it restores them only if the file is unchanged since, and reports "Adapter session". No app-specific adapters. |
 
 ## Material transfer (package C)
 
 | Capability | Status | Evidence / limitation |
 | --- | --- | --- |
 | Copy text/notes: internal + RTF + plain text in one transaction | Verified | `pbpaste` returned the note text. |
-| Copy mixed composition: internal + PNG + PDF + TIFF at export resolution | Verified | Separate process read the PNG (evidence image). |
+| Copy mixed composition: internal + PNG + PDF + TIFF at export resolution | Verified | Separate process read the PNG (evidence image). PNG/PDF are now delivered on demand from a copy-time snapshot (verified: a later edit did not change the pasted image). |
 | Copy file reference as real file URL; app surface as frozen visual | Verified (unit semantics) / Unverified (pasteboard) | |
 | Copy as image / text / link commands | Unverified | |
 | Paste internal selection with remapped IDs, relative geometry, visible offset | Verified | Three objects recreated; unit test checks new IDs. |

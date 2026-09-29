@@ -128,6 +128,31 @@ enum NativeWindows {
 
     static func title(_ a: AXUIElement) -> String? { string(a, kAXTitleAttribute as String) }
 
+    /// The first text area inside a window (document-based text apps).
+    static func textArea(in a: AXUIElement, depth: Int = 0) -> AXUIElement? {
+        var role: CFTypeRef?
+        AXUIElementCopyAttributeValue(a, kAXRoleAttribute as CFString, &role)
+        if (role as? String) == kAXTextAreaRole as String { return a }
+        var kids: CFTypeRef?
+        guard depth < 8, AXUIElementCopyAttributeValue(a, kAXChildrenAttribute as CFString, &kids) == .success, let arr = kids as? [AXUIElement] else { return nil }
+        for k in arr { if let t = textArea(in: k, depth: depth + 1) { return t } }
+        return nil
+    }
+
+    static func range(_ a: AXUIElement, _ attr: String) -> CFRange? {
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(a, attr as CFString, &v) == .success, let val = v else { return nil }
+        var r = CFRange()
+        return AXValueGetValue(val as! AXValue, .cfRange, &r) ? r : nil
+    }
+
+    @discardableResult
+    static func setRange(_ a: AXUIElement, _ attr: String, _ r: CFRange) -> Bool {
+        var rr = r
+        guard let v = AXValueCreate(.cfRange, &rr) else { return false }
+        return AXUIElementSetAttributeValue(a, attr as CFString, v) == .success
+    }
+
     static func isMinimized(_ a: AXUIElement) -> Bool {
         var v: CFTypeRef?
         AXUIElementCopyAttributeValue(a, kAXMinimizedAttribute as CFString, &v)

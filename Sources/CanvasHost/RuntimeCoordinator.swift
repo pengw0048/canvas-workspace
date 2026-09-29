@@ -196,7 +196,8 @@ final class RuntimeCoordinator: NSObject {
             (.remoteInput, !ax ? needAX : (bound ? .available : notConnected)),
             (.sourceIdentity, src?.documentPath != nil ? .available : .unsupported("the app does not report a document file for this window")),
             (.sourceReopen, src?.documentPath != nil ? .available : (src?.bundleID != nil ? .unavailable("only the application can be relaunched") : .unsupported("no source recorded"))),
-            (.sessionRestore, .unsupported("no adapter for this application; state lives in the app")),
+            (.sessionRestore, (src.flatMap { app.session.store.record("recovery", $0.id, as: TextDocumentSession.self) } != nil)
+                ? .available : .unsupported("no adapter state recorded; only text documents save selection and scroll")),
             (.dirtyState, .unsupported("unsaved changes are unknown for ordinary windows")),
             (.gracefulClose, gate(ax, needAX)),
             (.publication, gate(sc, needSC)),
@@ -205,6 +206,7 @@ final class RuntimeCoordinator: NSObject {
 
     func recoveryDepth(_ o: CanvasObject) -> RecoveryDepth {
         if bindings[o.id] != nil { return .survivingRuntime }
+        if let sid = o.props.sourceID, app.session.store.record("recovery", sid, as: TextDocumentSession.self) != nil { return .adapterSession }
         if let s = source(o), s.documentPath != nil { return .sourceReopen }
         return .visualOnly
     }
@@ -485,6 +487,46 @@ final class RuntimeCoordinator: NSObject {
         app.activeCanvas?.hud.flash("\(reason). The canvas object and its last visual are kept.")
     }
 
+    /// Session fields the generic text-document adapter saves (§8.3 "adapter session").
+    struct TextDocumentSession: Codable, Equatable {
+        var adapter = "ax-text-document"
+        var version = 1
+        var documentPath: String
+        var documentModified: Double
+        var selection: [Int]
+        var visibleStart: Int
+        var saved: Double
+    }
+
+    /// Records selection and scroll position for connected text documents, when they change.
+    func saveAdapterSessions() {
+        for (id, b) in bindings {
+            guard let ax = b.ax, let doc = NativeWindows.documentPath(ax), let t = NativeWindows.textArea(in: ax),
+                  let sel = NativeWindows.range(t, kAXSelectedTextRangeAttribute as String), let o = ws.object(id), let sid = o.props.sourceID else { continue }
+            let vis = NativeWindows.range(t, kAXVisibleCharacterRangeAttribute as String)?.location ?? 0
+            let mtime = ((try? FileManager.default.attributesOfItem(atPath: doc)[.modificationDate]) as? Date)?.timeIntervalSince1970 ?? 0
+            var s = TextDocumentSession(documentPath: doc, documentModified: mtime, selection: [sel.location, sel.length], visibleStart: vis, saved: 0)
+            let old = app.session.store.record("recovery", sid, as: TextDocumentSession.self)
+            if var o2 = old { o2.saved = 0; if o2 == s { continue } }
+            s.saved = Date().timeIntervalSince1970
+            try? app.session.store.putRecord("recovery", sid, s)
+        }
+    }
+
+    /// Restores saved fields after a reopen, only when the document is unchanged since they were saved.
+    func restoreAdapterSession(_ id: ObjectID) -> Bool {
+        guard let o = ws.object(id), let sid = o.props.sourceID, let s = app.session.store.record("recovery", sid, as: TextDocumentSession.self),
+              let b = bindings[id], let ax = b.ax, NativeWindows.documentPath(ax) == s.documentPath, let t = NativeWindows.textArea(in: ax) else { return false }
+        let mtime = ((try? FileManager.default.attributesOfItem(atPath: s.documentPath)[.modificationDate]) as? Date)?.timeIntervalSince1970 ?? -1
+        guard abs(mtime - s.documentModified) < 1 else {
+            Diagnostics.record("recovery", "document changed since session was saved; not replaying selection")
+            return false
+        }
+        // Scroll by selecting the first visible character, then restore the actual selection.
+        NativeWindows.setRange(t, kAXSelectedTextRangeAttribute as String, CFRange(location: s.visibleStart, length: 0))
+        return NativeWindows.setRange(t, kAXSelectedTextRangeAttribute as String, CFRange(location: s.selection[0], length: s.selection[1]))
+    }
+
     /// Periodic verification of bound windows and admission rules.
     func watch() {
         let wins = NativeWindows.list()
@@ -494,6 +536,7 @@ final class RuntimeCoordinator: NSObject {
                 lose(id, reason: "The window closed")
             }
         }
+        saveAdapterSessions()
         // While connected, the live window is the identity; follow the app's own document renames.
         for (id, b) in bindings {
             guard let ax = b.ax, let doc = NativeWindows.documentPath(ax), let o = ws.object(id), var src = source(o), src.documentPath != doc else { continue }
@@ -574,8 +617,14 @@ final class RuntimeCoordinator: NSObject {
                 return
             }
             self.bind(id, to: w, verifiedBy: how)
-            self.achievedDepth[id] = depth
-            c.hud.flash(depth == .survivingRuntime ? "Reconnected to the running window (\(how))" : "Reopened the source file. Unsaved state from the earlier session is not restored.")
+            var achieved = depth
+            if depth == .sourceReopen, self.restoreAdapterSession(id) { achieved = .adapterSession }
+            self.achievedDepth[id] = achieved
+            switch achieved {
+            case .survivingRuntime: c.hud.flash("Reconnected to the running window (\(how))")
+            case .adapterSession: c.hud.flash("Reopened the document and restored its selection and scroll position. Unsaved edits from the earlier session are not restored.", seconds: 5)
+            default: c.hud.flash("Reopened the source file. Unsaved state from the earlier session is not restored.")
+            }
             if thenActivate { self.activate(id, in: c) }
         }
         // 1. A surviving window of the same app showing the same document.
