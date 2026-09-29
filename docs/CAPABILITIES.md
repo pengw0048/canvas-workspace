@@ -43,7 +43,7 @@ exercised end to end. **Simulated** — exercised, but with a stand-in noted in 
 | Groups, align, distribute, tidy with preview (one undoable command) | Verified (unit: group scaling) / Unverified (UI) | Group handles scale members as one undoable command; application and file members change presentation size only. Tidy preview uses a modal confirmation. |
 | Connectors track targets; removed endpoint is kept and marked | Verified (unit) | |
 | Per-author undo that does not overwrite later edits by others | Verified (two processes) | Alice's undo reported a conflict and kept Bob's later move. |
-| Durable local autosave, visible save state, failure retry and export | Verified | `fail chunks` → "Not saved…", kill -9, restart shows only confirmed state. |
+| Durable local autosave, visible save state, failure retry and export | Verified | `fail chunks` → "Not saved…", kill -9, restart shows only confirmed state. Sharing status is separate: "Shared" once peers acknowledged the latest changes, "Syncing…" before that (too brief to observe on loopback), "Host offline · local edits kept" while disconnected. |
 | Asset bytes durable before any object references them | Verified | `fail assets` → capture creates no object. Unit test covers ordering. |
 | Personal camera per user and display, navigation back, focus view | Verified (camera restore) / Unverified (focus, back) | |
 | Search over text, titles, filenames, apps, URLs, named places | Unverified | |

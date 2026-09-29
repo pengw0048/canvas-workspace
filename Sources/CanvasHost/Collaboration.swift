@@ -167,12 +167,24 @@ final class Collaboration: NSObject {
 
     // MARK: Status
 
+    /// True while a connected peer has not yet acknowledged this device's latest shared changes.
+    var isSyncing: Bool {
+        let connected = peers.filter { $0.userID != nil && !$0.closed } + (upstream.map { $0.closed ? [] : [$0] } ?? [])
+        for p in connected {
+            for sid in p.scopes where !(p === upstream && (shares[sid]?.viewOnly ?? false)) {
+                guard let doc = ws.scopes[sid], let st = p.sync[sid] else { continue }
+                if st.theirHeads != doc.doc.heads() { return true }
+            }
+        }
+        return false
+    }
+
     var statusText: String? {
         if !listeners.isEmpty {
             let n = peers.filter { $0.userID != nil }.count
-            return n == 0 ? "Sharing · no one connected" : "Sharing · \(n) connected"
+            return n == 0 ? "Sharing · no one connected" : "\(isSyncing ? "Syncing…" : "Shared") · \(n) connected"
         }
-        if let u = upstream, !u.closed { return "Connected to \(shares[upstreamShare ?? ""]?.hostName ?? "host")" }
+        if let u = upstream, !u.closed { return "\(isSyncing ? "Syncing…" : "Shared") with \(shares[upstreamShare ?? ""]?.hostName ?? "host")" }
         if shares.values.contains(where: { !$0.hosted }) { return connecting ? "Connecting…" : "Host offline · local edits kept" }
         return nil
     }
@@ -422,6 +434,7 @@ final class Collaboration: NSObject {
                 try doc.doc.receiveSyncMessage(state: st, message: m.payload)
                 ws.scopeDidMerge(s)
                 for q in peers where q.scopes.contains(s) { pushSync(s, to: q) }
+                refreshUI()
             } catch { NSLog("sync error: %@", "\(error)") }
         case "asset-request":
             guard let a = m["id"] else { return }
@@ -479,6 +492,7 @@ final class Collaboration: NSObject {
             pushSync(s, to: u)
             uploadMissingAssets(s)
         }
+        refreshUI()
     }
 
     func receiveAsset(_ id: AssetID, _ bytes: Data, relay: Peer?) {
@@ -908,6 +922,7 @@ final class Collaboration: NSObject {
                 pushSync(s, to: p)
                 shares[s]?.lastContact = Date().timeIntervalSince1970
                 requestMissingAssets(s)
+                refreshUI()
             } catch { NSLog("sync error: %@", "\(error)") }
         case "asset":
             if let a = m["id"] { receiveAsset(a, m.payload, relay: nil) }
