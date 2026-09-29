@@ -71,6 +71,14 @@ final class RuntimeCoordinator: NSObject {
         nc.addObserver(self, selector: #selector(appActivated(_:)), name: NSWorkspace.didActivateApplicationNotification, object: nil)
         nc.addObserver(self, selector: #selector(appTerminated(_:)), name: NSWorkspace.didTerminateApplicationNotification, object: nil)
         watchTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in self?.watch() }
+        if let d = app.session.store.meta("admitRules")?.data(using: .utf8), let r = try? JSONDecoder().decode([String: WPoint].self, from: d) {
+            admitRules = r
+            knownWindows = Set(NativeWindows.list().map(\.windowID))
+        }
+    }
+
+    func saveAdmitRules() {
+        if let d = try? JSONEncoder().encode(admitRules), let s = String(data: d, encoding: .utf8) { try? app.session.store.setMeta("admitRules", s) }
     }
 
     var ws: Workspace { app.workspace }
@@ -226,7 +234,11 @@ final class RuntimeCoordinator: NSObject {
         case .alertFirstButtonReturn:
             let w = wins[popup.indexOfSelectedItem]
             if let id = admit(w, at: c.camera.visibleWorld.center, in: c) {
-                if rule.state == .on, let b = w.bundleID { admitRules[b] = c.camera.visibleWorld.center; knownWindows = Set(NativeWindows.list().map(\.windowID)) }
+                if rule.state == .on, let b = w.bundleID {
+                    admitRules[b] = c.camera.visibleWorld.center
+                    saveAdmitRules()
+                    knownWindows = Set(NativeWindows.list().map(\.windowID))
+                }
                 c.selection = [id]
             }
         case .alertSecondButtonReturn:
@@ -465,6 +477,7 @@ final class RuntimeCoordinator: NSObject {
         if activeObject == id { activeObject = nil; returnPanel?.orderOut(nil); activeCanvas?.exitFocusView() }
         app.collab?.runtimeLost(id)
         refreshAll(id)
+        Diagnostics.record("runtime", "binding lost: \(reason)")
         app.activeCanvas?.hud.flash("\(reason). The canvas object and its last visual are kept.")
     }
 

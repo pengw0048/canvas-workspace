@@ -142,6 +142,15 @@ extension CanvasView: NSMenuItemValidation {
             am.add("Distribute vertically", enabled: objs.count > 2) { self.perform("") { try self.ws.distribute(ids, .vertical) } }
             am.add("Tidy…", enabled: objs.count > 1) { self.previewTidy(ids) }
         }
+        if app.canvases.count > 1 {
+            // Each display has its own camera; bringing an object changes its shared position.
+            m.add("Bring to this display") {
+                guard let b = self.selectionBounds() else { return }
+                let c = self.camera.visibleWorld.center
+                self.perform("Bring here") { try self.ws.move(ids, dx: c.x - b.center.x, dy: c.y - b.center.y) }
+            }
+            m.add("Reveal on other displays") { for other in self.app.canvases where other !== self { if let id = ids.first { other.reveal(id) } } }
+        }
         m.add("Select behind") { self.selectBehind(at: wp) }
         if objs.count > 1 { m.add("Group") { self.perform("") { if let g = try self.ws.group(ids) { self.selection = [g] } } } }
         if let o = one, o.scope != Scope.privateID {

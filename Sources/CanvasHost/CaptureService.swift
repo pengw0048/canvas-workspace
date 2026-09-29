@@ -207,6 +207,25 @@ final class CaptureService {
         }
     }
 
+    /// Captures a window that is not on the canvas (global capture command) into the current view.
+    func captureLooseWindow(_ w: NativeWindow, in c: CanvasView) {
+        stillImage(windowID: w.windowID) { [weak self] r in
+            guard let self else { return }
+            switch r {
+            case .success(let img):
+                var src = CanvasObject(kind: .app, geom: Geometry(x: c.camera.visibleWorld.center.x - w.frame.width / 2, y: c.camera.visibleWorld.center.y - w.frame.height / 2,
+                                                                 w: w.frame.width, h: w.frame.height))
+                src.props.appName = NSRunningApplication(processIdentifier: w.pid)?.localizedName ?? w.ownerName
+                src.props.windowTitle = w.title
+                src.props.logicalSize = [w.frame.width, w.frame.height]
+                self.commitCapture(img, source: src, region: nil, in: c, origin: "global command")
+            case .failure(let e):
+                Diagnostics.record("capture", "\(e)")
+                c.hud.flash("\(e)", seconds: 5)
+            }
+        }
+    }
+
     /// Cropping an existing image creates a new image object; the original stays unchanged.
     func cropImage(_ id: ObjectID, normalized: CGRect, in c: CanvasView) {
         guard let o = ws.object(id), let img = app.images.fullImage(o.props.assetID), let cropped = crop(img, normalized),

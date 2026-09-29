@@ -100,6 +100,7 @@ final class HUDView: NSView {
     let bannerPanel = makePanel()
     let bannerLabel = NSTextField(labelWithString: "")
     let bannerButton: NSButton
+    let emptyHint = NSTextField(wrappingLabelWithString: "")
     var flashTimer: Timer?
 
     init(canvas: CanvasView) {
@@ -124,6 +125,11 @@ final class HUDView: NSView {
         bannerPanel.addSubview(bannerButton)
         bannerPanel.isHidden = true
         addSubview(bannerPanel)
+        emptyHint.alignment = .center
+        emptyHint.textColor = .tertiaryLabelColor
+        emptyHint.font = .systemFont(ofSize: 15)
+        emptyHint.stringValue = "This canvas is empty.\nDouble-click to write · S for a sticky note · ⇧⌘N to bring in an application window · drop files, images, or links anywhere"
+        addSubview(emptyHint)
         update()
     }
 
@@ -156,6 +162,7 @@ final class HUDView: NSView {
         bannerPanel.frame = NSRect(x: bounds.midX - bw / 2, y: 12, width: bw, height: 36)
         bannerLabel.frame = NSRect(x: 12, y: 10, width: bannerLabel.frame.width, height: 16)
         bannerButton.frame.origin = CGPoint(x: bannerLabel.frame.maxX + 12, y: 6)
+        emptyHint.frame = NSRect(x: bounds.midX - 280, y: bounds.midY - 30, width: 560, height: 60)
     }
 
     func update() {
@@ -165,6 +172,7 @@ final class HUDView: NSView {
         statusLabel.stringValue = parts.joined(separator: "  ·  ")
         if case .failed = app.workspace.saveState { statusLabel.textColor = .systemRed } else { statusLabel.textColor = .secondaryLabelColor }
         inputLabel.stringValue = app.runtime.inputOwnerText
+        emptyHint.isHidden = !app.workspace.live.isEmpty
         if let f = canvas.followUser {
             bannerPanel.isHidden = false
             bannerLabel.stringValue = "Following \(app.collab?.name(of: f) ?? "collaborator") — navigate to stop"

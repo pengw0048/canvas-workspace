@@ -63,8 +63,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard openWorkspace(at: last.map { directory(for: $0) } ?? dataDir) else { return }
         buildMenu()
         hotKeys = HotKeys()
-        hotKeys.register(keyCode: UInt32(kVK_Space), modifiers: UInt32(controlKey | optionKey)) { [weak self] in self?.hostCommand() }
-        hotKeys.register(keyCode: UInt32(kVK_ANSI_R), modifiers: UInt32(controlKey | optionKey | cmdKey)) { [weak self] in self?.emergencyReclaim() }
+        for (name, def, action) in [("hostCommand", "ctrl+opt+space", #selector(hostCommandAction)),
+                                    ("captureCommand", "ctrl+opt+c", #selector(globalCapture)),
+                                    ("reclaimCommand", "ctrl+opt+cmd+r", #selector(emergencyReclaimAction))] {
+            let sc = Shortcut.configured(name, default: def)
+            if !hotKeys.register(keyCode: sc.keyCode, modifiers: sc.modifiers, { [weak self] in _ = self?.perform(action) }) {
+                Diagnostics.record("hotkey", "\(name) could not be registered; another app may own it")
+            }
+        }
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         if ProcessInfo.processInfo.environment["CANVAS_AUTOMATION"] != nil || CommandLine.arguments.contains("--automation") {
             automation = Automation(app: self)
@@ -289,7 +295,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func selectionChanged(_ c: CanvasView) { inspector?.refresh() }
 
     func report(_ error: Error) {
-        NSLog("CanvasWorkspace error: %@", "\(error)")
+        Diagnostics.record("error", "\(error)")
         activeCanvas?.hud.flash("\(error)", seconds: 5)
     }
 
@@ -306,6 +312,22 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             NSApp.activate(ignoringOtherApps: true)
             activeCanvas?.window?.makeKeyAndOrderFront(nil)
         }
+    }
+
+    @objc func hostCommandAction() { hostCommand() }
+    @objc func emergencyReclaimAction() { emergencyReclaim() }
+
+    /// Global capture command: the active surface, else the frontmost window of the frontmost app.
+    @objc func globalCapture() {
+        guard let c = activeCanvas else { return }
+        if let id = runtime.activeObject { capture.captureObject(id, region: nil, in: c); return }
+        guard let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              let w = NativeWindows.list(onScreenOnly: true).first(where: { $0.pid == front.processIdentifier }) else {
+            if let sel = c.selection.first(where: { [.app, .browser].contains(workspace.object($0)?.kind) }) { capture.captureObject(sel, region: nil, in: c) }
+            else { c.hud.flash("Nothing to capture: activate an application or select a window surface") }
+            return
+        }
+        capture.captureLooseWindow(w, in: c)
     }
 
     /// Emergency host shortcut (⌃⌥⌘R): reclaim control of any shared application.
@@ -522,6 +544,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         m.add("History…") { self.showHistory(nil) }
         m.add("Bring managed windows onto a display") { self.recoverWindows(nil) }
         m.add("Export workspace…") { self.exportWorkspace(nil) }
+        m.add("Export diagnostics…") { Diagnostics.export(app: self) }
         m.addItem(.separator())
         m.add("Hide canvas (apps keep running)") { self.hideCanvas(nil) }
         m.add("Exit to desktop") { self.exitToDesktop(nil) }
