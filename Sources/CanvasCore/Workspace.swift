@@ -77,6 +77,9 @@ public final class Workspace {
     public private(set) var pendingChanges: [(ScopeID, Data)] = []
     var pendingAssets: [StagedAsset] = []
 
+    /// Scopes this participant may view but not edit (enforced again by the host).
+    public var readOnlyScopes: Set<ScopeID> = []
+
     public private(set) var undoStack: [UndoEntry] = []
     public private(set) var redoStack: [UndoEntry] = []
 
@@ -215,6 +218,9 @@ public final class Workspace {
                         _ body: (Transaction) throws -> Void) throws -> Set<ObjectID> {
         let tx = Transaction(self)
         try body(tx)
+        if let ro = tx.order.compactMap({ tx.working[$0]?.scope }).first(where: { readOnlyScopes.contains($0) }) {
+            throw CanvasError.permission("You can view but not edit this shared material (\(ro))")
+        }
         var changes: [FieldChange] = []
         var touchedScopes = Set<ScopeID>()
         for id in tx.order {
@@ -261,6 +267,7 @@ public final class Workspace {
     /// Concurrent edits by others are preserved; see `ScopeDocument.splice`.
     public func spliceText(_ id: ObjectID, baseHeads: Set<ChangeHash>, start: Int, delete: Int, insert: String) throws {
         guard let before = objects[id], let s = scopes[before.scope] else { throw CanvasError.missingObject(id) }
+        if readOnlyScopes.contains(before.scope) { throw CanvasError.permission("You can view but not edit this shared material") }
         try s.splice(id, baseHeads: baseHeads, start: start, delete: delete, insert: insert)
         s.commit(Self.commitMessage(name: "Edit text", author: user))
         var after = before
@@ -276,6 +283,7 @@ public final class Workspace {
     /// Applies formatting spans for the given names, changing only names whose spans differ.
     public func setMarks(_ id: ObjectID, _ desired: [TextMark], names: [String] = ["bold", "italic", "link"]) throws {
         guard let before = objects[id], let s = scopes[before.scope] else { throw CanvasError.missingObject(id) }
+        if readOnlyScopes.contains(before.scope) { throw CanvasError.permission("You can view but not edit this shared material") }
         let want = TextMark.normalized(desired)
         var changed = false
         for n in names where before.marks.filter({ $0.name == n }) != want.filter({ $0.name == n }) {
@@ -348,6 +356,7 @@ public final class Workspace {
     /// Moves objects to another scope document. Not part of canvas undo; publication is explicit.
     public func moveToScope(_ ids: [ObjectID], scope target: ScopeID) throws {
         guard let dst = scopes[target] else { throw CanvasError.scopeNotReady(target) }
+        if readOnlyScopes.contains(target) { throw CanvasError.permission("You can view but not add to this shared material") }
         var encoded: [ScopeID: Data] = [:]
         var srcs = Set<ScopeID>()
         for id in ids {

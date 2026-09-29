@@ -124,7 +124,7 @@ and identities on the same Mac, connected over loopback TLS-PSK. **Simulated:** 
 | Reference page mode (per-user rendering, captures) | Verified (page load and preview) | |
 | Provider-collaborative document mode | Unverified | Opens the link in the user's own browser; no credentials copied. |
 | Purpose-built adapters, scroll-follow | Not implemented | |
-| View-only membership | Not implemented | All members can edit a shared scope. |
+| View-only membership | Verified | A view-only member's editor refuses changes; a modified client that edits anyway has its changes ignored by the host (diagnostic recorded), so they never reach other members. Role changes reconnect the member. |
 | Runtime sharing from a member (not the session host) | Not implemented | Only the session host can share applications. |
 
 ## Performance (§14)

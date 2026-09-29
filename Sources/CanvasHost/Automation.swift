@@ -409,6 +409,13 @@ final class Automation {
                 return json(["live": app.collab?.liveShared.contains(args[0]) ?? false])
             case "remoteframes":
                 return json(["frames": app.collab?.remoteFrames.mapValues { Date().timeIntervalSince($0.1) } ?? [:]])
+            case "setrole":
+                app.collab?.setRole(args[0], viewOnly: args[1] == "view")
+                return json(["ok": true])
+            case "unlock":
+                // Test only: act like a modified client that ignores its view-only role.
+                ws.readOnlyScopes.removeAll()
+                return json(["ok": true])
             case "identity":
                 return json(["id": app.identity.id, "name": app.identity.name])
             case "flush":

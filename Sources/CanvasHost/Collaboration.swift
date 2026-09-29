@@ -15,7 +15,30 @@ struct ShareInfo: Codable {
     /// Host only: authorized member IDs and names.
     var members: [String: String] = [:]
     var revoked: [String] = []
+    /// Host: members limited to viewing. Member: whether this device is view-only.
+    var viewers: [String] = []
+    var viewOnly: Bool = false
     var lastContact: Double?
+
+    init(scopeID: ScopeID, title: String, hosted: Bool, inviteCode: String? = nil, hostEndpoint: String? = nil) {
+        self.scopeID = scopeID; self.title = title; self.hosted = hosted; self.inviteCode = inviteCode; self.hostEndpoint = hostEndpoint
+    }
+
+    /// Records written by earlier versions lack newer fields; missing fields take their defaults.
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        scopeID = try c.decode(ScopeID.self, forKey: .scopeID)
+        title = try c.decode(String.self, forKey: .title)
+        hosted = try c.decode(Bool.self, forKey: .hosted)
+        inviteCode = try c.decodeIfPresent(String.self, forKey: .inviteCode)
+        hostEndpoint = try c.decodeIfPresent(String.self, forKey: .hostEndpoint)
+        hostName = try c.decodeIfPresent(String.self, forKey: .hostName)
+        members = try c.decodeIfPresent([String: String].self, forKey: .members) ?? [:]
+        revoked = try c.decodeIfPresent([String].self, forKey: .revoked) ?? []
+        viewers = try c.decodeIfPresent([String].self, forKey: .viewers) ?? []
+        viewOnly = try c.decodeIfPresent(Bool.self, forKey: .viewOnly) ?? false
+        lastContact = try c.decodeIfPresent(Double.self, forKey: .lastContact)
+    }
 }
 
 struct Presence {
@@ -35,6 +58,7 @@ final class Peer {
     var userID: String?
     var name: String?
     var scopes: Set<ScopeID> = []
+    var viewOnly: Set<ScopeID> = []
     var sync: [ScopeID: SyncState] = [:]
     var pendingSends = 0
     var onMessage: ((Peer, WireMessage) -> Void)?
@@ -115,6 +139,7 @@ final class Collaboration: NSObject {
         myColor = [NSColor.systemPink, .systemPurple, .systemTeal, .systemIndigo, .systemBrown][abs(app.identity.id.hashValue) % 5]
         shares = app.session.store.records("share", as: ShareInfo.self)
         for (id, s) in shares where app.workspace.scopes[id] == nil { _ = s; shares[id] = nil }
+        for (id, s) in shares where s.viewOnly { app.workspace.readOnlyScopes.insert(id) }
         app.workspace.onLocalScopeChange = { [weak self] s in self?.scopeChanged(s) }
         presenceTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
         reclaimTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.watchLocalInput() }
@@ -342,10 +367,11 @@ final class Collaboration: NSObject {
                 shares[s.scopeID] = s
                 saveShare(s.scopeID)
                 p.scopes.insert(s.scopeID)
+                if s.viewers.contains(u) { p.viewOnly.insert(s.scopeID) }
                 p.sync[s.scopeID] = SyncState()
             }
             p.send(WireMessage("welcome", ["host": app.identity.name, "hostUser": me,
-                                           "scopes": allowed.map { "\($0.scopeID)\t\($0.title)" }.joined(separator: "\n")]))
+                                           "scopes": allowed.map { "\($0.scopeID)\t\($0.title)\t\($0.viewers.contains(u) ? "view" : "edit")" }.joined(separator: "\n")]))
             for s in p.scopes { pushSync(s, to: p) }
             sendPresence(to: [p])
             for (id, a) in arbiters { if let c = a.controller { p.send(WireMessage("control-state", ["o": id, "user": c])) } }
@@ -357,6 +383,15 @@ final class Collaboration: NSObject {
                 return
             }
             do {
+                if p.viewOnly.contains(s) {
+                    // A viewer's message updates what we know they have, but its changes never reach the document.
+                    let probe = doc.doc.fork()
+                    let before = probe.heads()
+                    try probe.receiveSyncMessage(state: st, message: m.payload)
+                    if probe.heads() != before { Diagnostics.record("sharing", "ignored edits from view-only member \(p.name ?? "?")") }
+                    pushSync(s, to: p)
+                    return
+                }
                 try doc.doc.receiveSyncMessage(state: st, message: m.payload)
                 ws.scopeDidMerge(s)
                 for q in peers where q.scopes.contains(s) { pushSync(s, to: q) }
@@ -368,7 +403,7 @@ final class Collaboration: NSObject {
             else { p.send(WireMessage("asset-denied", ["id": a])) }
         case "asset":
             // Upload from a member for material they placed in a shared scope.
-            guard let a = m["id"], !p.scopes.isEmpty else { return }
+            guard let a = m["id"], !p.scopes.subtracting(p.viewOnly).isEmpty else { return }
             receiveAsset(a, m.payload, relay: p)
         case "presence":
             guard let u = p.userID else { return }
@@ -771,8 +806,8 @@ final class Collaboration: NSObject {
         switch m.type {
         case "welcome":
             connecting = false
-            let scopes = (m["scopes"] ?? "").split(separator: "\n").map { $0.split(separator: "\t", maxSplits: 1).map(String.init) }
-            for s in scopes where s.count == 2 {
+            let scopes = (m["scopes"] ?? "").split(separator: "\n").map { $0.split(separator: "\t").map(String.init) }
+            for s in scopes where s.count >= 2 {
                 let sid = s[0]
                 if ws.scopes[sid] == nil { try? app.session.attachScope(ScopeDocument(id: sid)) }
                 var si = shares[sid] ?? ShareInfo(scopeID: sid, title: s[1], hosted: false)
@@ -780,6 +815,8 @@ final class Collaboration: NSObject {
                 si.hostEndpoint = info.hostEndpoint
                 si.hostName = m["host"]
                 si.lastContact = Date().timeIntervalSince1970
+                si.viewOnly = s.count > 2 && s[2] == "view"
+                if si.viewOnly { ws.readOnlyScopes.insert(sid) } else { ws.readOnlyScopes.remove(sid) }
                 shares[sid] = si
                 saveShare(sid)
                 p.scopes.insert(sid)
@@ -1034,6 +1071,18 @@ final class Collaboration: NSObject {
         browser?.cancel()
     }
 
+    /// Changes a member's role; it applies from their next connection, which is started now.
+    func setRole(_ user: String, viewOnly: Bool) {
+        for (id, var s) in shares where s.hosted {
+            s.viewers.removeAll { $0 == user }
+            if viewOnly { s.viewers.append(user) }
+            shares[id] = s
+            saveShare(id)
+        }
+        for p in peers where p.userID == user { p.close() }
+        refreshUI()
+    }
+
     func removeMember(_ user: String) {
         for (id, var s) in shares where s.hosted {
             s.members[user] = nil
@@ -1136,6 +1185,8 @@ final class CollaborationPanel: NSObject {
             var allMembers: [String: String] = [:]
             for s in hosted { allMembers.merge(s.members) { a, _ in a } }
             for (u, n) in allMembers.sorted(by: { $0.value < $1.value }) {
+                let isViewer = hosted.contains { $0.viewers.contains(u) }
+                buttons.addArrangedSubview(button(isViewer ? "Let \(n) edit" : "Make \(n) view-only") { c.setRole(u, viewOnly: !isViewer) })
                 buttons.addArrangedSubview(button("Remove \(n)'s access…") {
                     let a = NSAlert()
                     a.messageText = "Remove \(n)'s access?"
