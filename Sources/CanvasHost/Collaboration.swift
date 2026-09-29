@@ -665,14 +665,15 @@ final class Collaboration: NSObject {
         guard liveShared.contains(id), let o = ws.object(id), shares[o.scope]?.hosted == true else { return }
         if let t = lastFrameSent[id], Date().timeIntervalSince(t) < 1.0 / 15 { return }
         lastFrameSent[id] = Date()
+        // JPEG has no alpha: flatten onto white so window corners do not turn black.
         var src = img
-        if img.width > 1600 {
-            let s = 1600.0 / Double(img.width)
-            if let ctx = CGContext(data: nil, width: 1600, height: Int(Double(img.height) * s), bitsPerComponent: 8, bytesPerRow: 0,
-                                   space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
-                ctx.draw(img, in: CGRect(x: 0, y: 0, width: ctx.width, height: ctx.height))
-                src = ctx.makeImage() ?? img
-            }
+        let s = min(1, 1600.0 / Double(img.width))
+        if let ctx = CGContext(data: nil, width: Int(Double(img.width) * s), height: Int(Double(img.height) * s), bitsPerComponent: 8, bytesPerRow: 0,
+                               space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) {
+            ctx.setFillColor(.white)
+            ctx.fill(CGRect(x: 0, y: 0, width: ctx.width, height: ctx.height))
+            ctx.draw(img, in: CGRect(x: 0, y: 0, width: ctx.width, height: ctx.height))
+            src = ctx.makeImage() ?? img
         }
         guard let jpeg = NSBitmapImageRep(cgImage: src).representation(using: .jpeg, properties: [.compressionFactor: 0.6]) else { return }
         let m = WireMessage("frame", ["o": id, "time": "\(Date().timeIntervalSince1970)"], payload: jpeg)

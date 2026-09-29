@@ -101,6 +101,7 @@ final class CaptureService {
                 cfg.height = Int(w.frame.height * scale)
                 cfg.showsCursor = false
                 cfg.ignoreShadowsSingleWindow = true
+                cfg.backgroundColor = .clear
                 let img = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
                 if Self.isBlank(img) { throw CaptureError.protectedContent }
                 await MainActor.run { done(.success(img)) }

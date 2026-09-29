@@ -404,6 +404,11 @@ final class Automation {
                 ed.textView.insertText(sp[1], replacementRange: NSRange(location: NSNotFound, length: 0))
                 ed.commit()
                 return json(["text": ws.object(sp[0])?.text ?? "", "editor": ed.textView.string])
+            case "liveshare":
+                app.collab?.toggleLiveShare(args[0])
+                return json(["live": app.collab?.liveShared.contains(args[0]) ?? false])
+            case "remoteframes":
+                return json(["frames": app.collab?.remoteFrames.mapValues { Date().timeIntervalSince($0.1) } ?? [:]])
             case "identity":
                 return json(["id": app.identity.id, "name": app.identity.name])
             case "flush":
