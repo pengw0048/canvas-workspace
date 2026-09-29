@@ -14,9 +14,13 @@ win() { h windows | python3 -c "import json,sys; ws=[w for w in json.load(sys.st
 
 # --- setup (not recorded) ---
 rm -rf $W/host $W/maya; mkdir -p $W
-axclose=$T/cw-axclose; [[ $axclose -nt $root/scripts/axclose.swift ]] || swiftc -O $root/scripts/axclose.swift -o $axclose 2>/dev/null
-# Windows left from an earlier take share titles with the new fixtures; close them first.
-$axclose Preview latency-chart >/dev/null; $axclose TextEdit metrics.csv >/dev/null; $axclose TextEdit "Launch review" >/dev/null; sleep 1
+# Earlier takes leave windows with the same titles. Quit TextEdit and Preview, but only when every
+# titled window belongs to a demo or test fixture; otherwise stop so nothing personal is lost.
+aw=$T/cw-appwindows; [[ $aw -nt $root/scripts/demo/app-windows.swift ]] || swiftc -O $root/scripts/demo/app-windows.swift -o $aw 2>/dev/null
+allowed='^(latency-chart.png|sample.png|Launch review.rtfd|metrics.csv.txt|data.txt|deliverable.rtfd|final.rtfd|final.rtf|report.txt|)$'
+others=$($aw | sed 's/^[^|]*| //' | grep -Ev "$allowed")
+if [[ -n "$others" ]]; then echo "refusing to reset: other TextEdit/Preview windows are open:"; echo "$others"; exit 1; fi
+pkill -x TextEdit; pkill -x Preview; sleep 1.5
 open -a TextEdit $FX/metrics.csv.txt; open -a Preview $FX/latency-chart.png; open -a TextEdit "$FX/Launch review.rtfd"; sleep 3
 rm -f $HS $CS
 CANVAS_DATA_DIR=$W $root/.build/debug/CanvasWorkspace --automation --profile demo > $W/demo.log 2>&1 &
