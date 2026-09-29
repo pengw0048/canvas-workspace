@@ -8,8 +8,12 @@ recorded here with evidence.
 
 - One Swift Package Manager executable (`CanvasHost`) bundled into `CanvasWorkspace.app` by
   `scripts/build-app.sh`. Builds with the Command Line Tools only; no Xcode project.
-- The canvas is a borderless window covering the display's visible frame (menu bar and Dock stay
-  reachable, so application menus, app switching, and system UI keep working).
+- The canvas is a borderless window per display covering everything but the Dock. The menu bar
+  auto-hides while the canvas is frontmost and appears on hover, so application menus, app
+  switching, and system UI keep working. The canvas lives on one Space. A macOS full-screen Space
+  was rejected because activating another app would switch Spaces and real windows could not come
+  above the canvas; a desktop-level window was rejected because real windows would always float
+  above canvas content.
 - Why: ScreenCaptureKit, Accessibility (AX), NSWorkspace, NSPasteboard, NSDraggingSession, file
   promises, IME (`NSTextInputClient`), and Carbon global hot keys are all in-process. A web-only
   stack cannot reach these; a web renderer inside a native host would need a bridge for every one

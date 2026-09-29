@@ -6,6 +6,8 @@ import CanvasCore
 final class CanvasWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+    /// Borderless canvas windows may cover the auto-hidden menu bar area.
+    override func constrainFrameRect(_ r: NSRect, to screen: NSScreen?) -> NSRect { styleMask.contains(.titled) ? super.constrainFrameRect(r, to: screen) : r }
 }
 
 struct Identity: Codable {

@@ -50,13 +50,15 @@ process). Fixtures: a local research page, `data.txt` and `final.rtf` in TextEdi
 
 Evidence: [evidence/e2e12-resumed-scene.png](evidence/e2e12-resumed-scene.png) (frozen v1 capture next to
 the changed page, co-edited note, context menu), [evidence/e2e12-deliverable-graphic.png](evidence/e2e12-deliverable-graphic.png)
-(the image as stored in the deliverable). Limitations: one Mac and two processes, not two machines;
-the remote typing needed a click into the document first.
+(the image as stored in the deliverable). Limitations: one Mac and two processes, not two machines.
+Remote typing then needed a click into the document first; text is now posted on the HID path and
+arrives without the click (verified afterwards).
 
 ## Canvas and document (package B)
 
 | Capability | Status | Evidence / limitation |
 | --- | --- | --- |
+| Desktop-scale surface | Verified | A borderless canvas per display reaches the top edge; the menu bar auto-hides while the canvas is frontmost and the Dock stays reachable. One Space. |
 | Continuous pan/zoom camera, dot grid, level of detail with hysteresis | Verified (rendering) | Screenshots at several zoom levels. Gesture feel not yet reviewed by a person. |
 | Sticky, text, shape (rect/ellipse/line/arrow), ink, highlighter, eraser, frame, image, connector | Verified (rendering and storage); eraser Unverified | Created through automation; pointer creation paths not exercised by a person. |
 | Rotation for native objects; app/file previews stay upright | Verified (rendering) | |
