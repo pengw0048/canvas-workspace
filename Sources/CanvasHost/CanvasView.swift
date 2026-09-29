@@ -102,6 +102,15 @@ final class CanvasView: NSView, SceneContext {
     var drag: DragOp = .none
     var spaceHeld = false
     var lastPointerWorld: WPoint?
+    /// Where the pointer is on screen; when the camera moves under a still pointer, its world point follows.
+    var lastPointerView: CGPoint?
+
+    /// Sets the pointer without publishing (automation publishes on its own schedule).
+    func notePointerQuietly(_ w: WPoint) {
+        lastPointerWorld = w
+        lastPointerView = camera.toView(w)
+        lastPointerTime = Date()
+    }
     var lastPointerTime = Date.distantPast
     var pasteCount = 0
     var lastPasteSignature = ""
@@ -268,6 +277,7 @@ final class CanvasView: NSView, SceneContext {
 
     func applyCamera() {
         renderer.applyCamera(camera)
+        if let v = lastPointerView, bounds.contains(v) { lastPointerWorld = camera.toWorld(v) }
         minimap?.refreshViewport()
         needsDisplay = true
         updateOverlay()

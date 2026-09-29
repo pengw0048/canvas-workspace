@@ -477,19 +477,25 @@ final class Automation {
                 c.setCamera(cam, animated: true, record: true, duration: Double(args.count > 2 ? args[2] : "1") ?? 1)
                 return json(["ok": true])
             case "pointer":
-                c.lastPointerWorld = WPoint(x: Double(args[0]) ?? 0, y: Double(args[1]) ?? 0)
+                c.notePointerQuietly(WPoint(x: Double(args[0]) ?? 0, y: Double(args[1]) ?? 0))
                 c.lastPointerTime = Date()
                 app.collab?.publishPresence(from: c)
                 return json(["ok": true])
             case "glide":
                 // glide <x1> <y1> <x2> <y2> <seconds>: moves this participant's pointer smoothly.
-                let v = args.compactMap(Double.init)
+                // It starts from where the pointer is now, if there is one.
+                var v = args.compactMap(Double.init)
                 guard v.count >= 5 else { return json(["error": "glide x1 y1 x2 y2 seconds"]) }
+                if let cur = c.lastPointerWorld { v[0] = cur.x; v[1] = cur.y }
+
                 let start = CACurrentMediaTime()
                 Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { t in
                     let p = min(1, (CACurrentMediaTime() - start) / v[4])
-                    let e = p < 0.5 ? 2 * p * p : 1 - pow(-2 * p + 2, 2) / 2
-                    c.lastPointerWorld = WPoint(x: v[0] + (v[2] - v[0]) * e, y: v[1] + (v[3] - v[1]) * e)
+                    let e = p < 0.5 ? 4 * p * p * p : 1 - pow(-2 * p + 2, 3) / 2
+                    // A hand stays on its own screen: while the view moves, the pointer is kept inside it.
+                    let vis = c.camera.visibleWorld.insetBy(24 / c.camera.zoom)
+                    let x = v[0] + (v[2] - v[0]) * e, y = v[1] + (v[3] - v[1]) * e
+                    c.notePointerQuietly(WPoint(x: min(max(x, vis.x), vis.maxX), y: min(max(y, vis.y), vis.maxY)))
                     c.lastPointerTime = Date()
                     self.app.collab?.lastPresenceSent = .distantPast
                     self.app.collab?.publishPresence(from: c)

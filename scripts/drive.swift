@@ -12,15 +12,31 @@ func flags(_ s: String) -> CGEventFlags {
     }
     return f
 }
+/// Moves the pointer to p with an eased path, taking longer for longer distances, like a hand would.
+func travel(_ p: CGPoint, drag: Bool = false) {
+    let p0 = CGEvent(source: nil)?.location ?? p
+    let d = hypot(p.x - p0.x, p.y - p0.y)
+    guard d > 2 else { return }
+    let steps = Int(min(0.9, max(0.3, d / 1400)) * 90)
+    for i in 1...steps {
+        let t = Double(i) / Double(steps), e = t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2
+        let q = CGPoint(x: p0.x + (p.x - p0.x) * e, y: p0.y + (p.y - p0.y) * e)
+        let ev = CGEvent(mouseEventSource: src, mouseType: drag ? .leftMouseDragged : .mouseMoved, mouseCursorPosition: q, mouseButton: .left)
+        ev?.post(tap: .cghidEventTap); usleep(11_000)
+    }
+}
+
 switch a[1] {
 case "click":
     let p = CGPoint(x: Double(a[2])!, y: Double(a[3])!)
+    travel(p); usleep(80_000)
     mouse(.mouseMoved, p); mouse(.leftMouseDown, p); mouse(.leftMouseUp, p)
     if a.count > 4 { usleep(30_000); let d = CGEvent(mouseEventSource: src, mouseType: .leftMouseDown, mouseCursorPosition: p, mouseButton: .left); d?.setIntegerValueField(.mouseEventClickState, value: 2); post(d); let u = CGEvent(mouseEventSource: src, mouseType: .leftMouseUp, mouseCursorPosition: p, mouseButton: .left); u?.setIntegerValueField(.mouseEventClickState, value: 2); post(u) }
 case "drag":
     let p1 = CGPoint(x: Double(a[2])!, y: Double(a[3])!), p2 = CGPoint(x: Double(a[4])!, y: Double(a[5])!)
     // Optional pause after pressing, as text views start a drag only from a held press.
     let pre = a.count > 7 ? Int(a[7])! : 150
+    travel(p1); usleep(80_000)
     mouse(.mouseMoved, p1); mouse(.leftMouseDown, p1); usleep(useconds_t(pre * 1000))
     for i in 1...30 { let t = Double(i) / 30; mouse(.leftMouseDragged, CGPoint(x: p1.x + (p2.x - p1.x) * t, y: p1.y + (p2.y - p1.y) * t)); usleep(16_000) }
     // Optional hold at the target with small movements, for spring-loaded destinations.
@@ -65,9 +81,7 @@ case "keys":
     }
 case "hover":
     // Moves the pointer without pressing, over about half a second.
-    let p0 = CGEvent(source: nil)?.location ?? .zero, p1 = CGPoint(x: Double(a[2])!, y: Double(a[3])!)
-    for i in 1...30 { let t = Double(i) / 30, e = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
-        mouse(.mouseMoved, CGPoint(x: p0.x + (p1.x - p0.x) * e, y: p0.y + (p1.y - p0.y) * e)); usleep(4_000) }
+    travel(CGPoint(x: Double(a[2])!, y: Double(a[3])!))
 case "front":
     let f = NSWorkspace.shared.frontmostApplication
     print(a.count > 2 ? "\(f?.processIdentifier ?? 0)" : f?.localizedName ?? "?")

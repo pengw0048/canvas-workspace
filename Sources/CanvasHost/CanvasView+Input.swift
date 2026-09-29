@@ -6,6 +6,7 @@ extension CanvasView {
 
     func notePointer(_ w: WPoint) {
         lastPointerWorld = w
+        lastPointerView = camera.toView(w)
         lastPointerTime = Date()
         app.collab?.publishPointer(w, from: self)
     }

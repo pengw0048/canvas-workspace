@@ -141,9 +141,13 @@ h reclaim $NUM >/dev/null; back Numbers; sleep 1.2
 h fly -620 -40 0.52 1.4; sleep 1.6
 h select $(h state | python3 -c "import json,sys; d=json.load(sys.stdin); print(' '.join(o['id'] for o in d['objects'] if o.get('parent')=='$FR_KY' and o['kind'] in ('image','sticky','app')))") >/dev/null
 mark copy; isfront CanvasWorkspace && $drive key 8 cmd,opt; sleep 0.8                # real ⌥⌘C: copy as one image
-h flyto $PAGES 120 1.6; sleep 2; mark pages; dbl $PAGES; sleep 1.4                  # into the real Pages
+chat() { local S=($(h screen $1 $2 | xy)); isfront CanvasWorkspace && { $drive hover $S[1] $S[2]; $drive key 44; sleep 0.3; $drive typeu 60 "$3"; sleep 0.4; $drive key 36; }; }
+chat -700 -150 "妈妈，我把行程放进行程单了，您看看"; sleep 0.6
+m follow $HOST_ID >/dev/null; m chat 14 "好，我看看" >/dev/null                          # 妈妈 follows to the document
+h flyto $PAGES 120 1.6; sleep 1.6; mto $PAGES 0.3 0.4 0.8; mark pages; dbl $PAGES; sleep 1.4   # into the real Pages
 F=($(frame Pages 日本行程)); isfront Pages && { $drive click $((F[1] + 300)) $((F[2] + F[4] - 60)); sleep 0.4; $drive key 125 cmd; sleep 0.3; $drive key 36; $drive key 9 cmd; }; sleep 2   # real ⌘V at the end
-isfront Pages && $drive key 1 cmd; sleep 1                                          # real ⌘S
+isfront Pages && $drive key 1 cmd; sleep 0.6                                        # real ⌘S
+mto $PAGES 0.35 0.6 1.2; m chat 14 "行程单很清楚，打印出来带着走" >/dev/null; sleep 1.6    # 妈妈 reads the itinerary
 isfront Pages && $drive key 35 cmd; sleep 3                                         # print preview
 isfront Pages && $drive key 53; sleep 1
 mark pages-back; back Pages; sleep 1.2
