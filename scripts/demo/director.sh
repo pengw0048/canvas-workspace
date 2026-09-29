@@ -14,6 +14,9 @@ win() { h windows | python3 -c "import json,sys; ws=[w for w in json.load(sys.st
 
 # --- setup (not recorded) ---
 rm -rf $W/host $W/maya; mkdir -p $W
+axclose=$T/cw-axclose; [[ $axclose -nt $root/scripts/axclose.swift ]] || swiftc -O $root/scripts/axclose.swift -o $axclose 2>/dev/null
+# Windows left from an earlier take share titles with the new fixtures; close them first.
+$axclose Preview latency-chart >/dev/null; $axclose TextEdit metrics.csv >/dev/null; $axclose TextEdit "Launch review" >/dev/null; sleep 1
 open -a TextEdit $FX/metrics.csv.txt; open -a Preview $FX/latency-chart.png; open -a TextEdit "$FX/Launch review.rtfd"; sleep 3
 rm -f $HS $CS
 CANVAS_DATA_DIR=$W $root/.build/debug/CanvasWorkspace --automation --profile demo > $W/demo.log 2>&1 &

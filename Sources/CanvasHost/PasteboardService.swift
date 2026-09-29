@@ -350,7 +350,8 @@ final class CompositionProvider: NSObject, NSPasteboardItemDataProvider {
 
     func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
         guard let img = image() else { Diagnostics.record("clipboard", "deferred render failed"); return }
-        if type == .png, let d = pngData(img, maxPixels: 60_000_000) { item.setData(d, forType: .png) }
+        // Compositions paste at a document-friendly width; the full pixels are kept for zooming.
+        if type == .png, let d = pngData(img, maxPixels: 60_000_000, displayWidth: min(480, Double(img.width) / 2)) { item.setData(d, forType: .png) }
         if type == .pdfType, let service { item.setData(service.pdfData(img), forType: .pdfType) }
     }
 

@@ -379,6 +379,18 @@ extension CaptureService {
     }
 }
 
+/// PNG whose resolution metadata makes document apps show it at most `points` wide (pixels unchanged).
+func pngData(_ img: CGImage, maxPixels: Int, displayWidth points: Double) -> Data? {
+    guard var png = pngData(img, maxPixels: maxPixels), let src = CGImageSourceCreateWithData(png as CFData, nil),
+          let full = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+    let dpi = max(72, 72 * Double(full.width) / points)
+    let out = NSMutableData()
+    guard let dst = CGImageDestinationCreateWithData(out, "public.png" as CFString, 1, nil) else { return png }
+    CGImageDestinationAddImage(dst, full, [kCGImagePropertyDPIWidth: dpi, kCGImagePropertyDPIHeight: dpi] as CFDictionary)
+    if CGImageDestinationFinalize(dst) { png = out as Data }
+    return png
+}
+
 func pngData(_ img: CGImage, maxPixels: Int) -> Data? {
     var src = img
     let px = img.width * img.height

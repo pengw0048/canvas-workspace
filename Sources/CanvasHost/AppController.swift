@@ -107,7 +107,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if ProcessInfo.processInfo.environment["CANVAS_AUTOMATION"] != nil || CommandLine.arguments.contains("--automation") {
             automation = Automation(app: self)
         }
-        if !CommandLine.arguments.contains("--background") { NSApp.activate(ignoringOtherApps: true) }
+        let quiet = CommandLine.arguments.contains("--background") || CommandLine.arguments.contains("--hidden")
+        if !quiet { NSApp.activate(ignoringOtherApps: true) }
+        if CommandLine.arguments.contains("--hidden") { NSApp.setActivationPolicy(.accessory) }
     }
 
     func fail(_ error: Error, _ dir: URL) {
@@ -287,7 +289,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             canvases.append(cv)
             // `--background` keeps development runs behind the user's windows without taking focus.
             // `--hidden` runs a participant with no visible window (for recordings).
-            if CommandLine.arguments.contains("--hidden") { w.orderOut(nil) }
+            if CommandLine.arguments.contains("--hidden") {
+                w.alphaValue = 0
+                w.ignoresMouseEvents = true
+                w.orderOut(nil)
+            }
             else if CommandLine.arguments.contains("--background") { w.orderBack(nil) } else { w.makeKeyAndOrderFront(nil) }
             w.makeFirstResponder(cv)
         }
