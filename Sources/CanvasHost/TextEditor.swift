@@ -37,6 +37,8 @@ final class TextEditor: NSObject, NSTextViewDelegate {
     /// The text and document heads the editor last synchronized with.
     var lastCommitted: String
     var baseHeads: Set<ChangeHash>
+    /// True while this editor writes to the document; its own change notifications are ignored.
+    var committing = false
 
     init(objectID: ObjectID, canvas: CanvasView) {
         self.objectID = objectID
@@ -145,6 +147,9 @@ final class TextEditor: NSObject, NSTextViewDelegate {
 
     func commit() {
         commitTimer?.invalidate()
+        guard !committing else { return }
+        committing = true
+        defer { committing = false }
         let mine = textView.string
         guard !textView.hasMarkedText() else { return }
         guard mine != lastCommitted, let o = canvas.ws.object(objectID) else { commitMarks(); return }
@@ -182,7 +187,7 @@ final class TextEditor: NSObject, NSTextViewDelegate {
 
     /// Merges a remote text change into the open editor without discarding local typing.
     func remoteUpdate() {
-        guard let o = canvas.ws.objects[objectID] else { return }
+        guard !committing, let o = canvas.ws.objects[objectID] else { return }
         if o.deleted { canvas.endEditing(); return }
         guard !textView.hasMarkedText() else { return }
         if textView.string != lastCommitted { commit(); return }

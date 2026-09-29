@@ -26,6 +26,9 @@ case "drag":
     var held = 0
     while held < hold { mouse(.leftMouseDragged, CGPoint(x: p2.x + Double(held / 50 % 2), y: p2.y)); usleep(50_000); held += 50 }
     mouse(.leftMouseDragged, p2); usleep(200_000); mouse(.leftMouseUp, p2)
+case "down": mouse(.leftMouseDown, CGPoint(x: Double(a[2])!, y: Double(a[3])!))
+case "move": mouse(.leftMouseDragged, CGPoint(x: Double(a[2])!, y: Double(a[3])!))
+case "up": mouse(.leftMouseUp, CGPoint(x: Double(a[2])!, y: Double(a[3])!))
 case "type":
     // Unicode events need a non-letter key code; some apps otherwise use the key code's character.
     for ch in a[2...].joined(separator: " ").utf16 {

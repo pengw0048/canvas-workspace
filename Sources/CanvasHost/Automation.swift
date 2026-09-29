@@ -277,7 +277,7 @@ final class Automation {
                 return json(["ok": true])
             case "arbiter":
                 guard let a = app.collab?.arbiters[args[0]] else { return json(["controller": ""]) }
-                return json(["controller": a.controller ?? "", "generation": a.generation, "lastSeq": a.lastSeq])
+                return json(["controller": a.controller ?? "", "generation": a.generation, "lastSeq": a.lastSeq, "paused": a.paused ?? ""])
             case "winid":
                 return json(["id": c.window?.windowNumber ?? 0])
             case "assetreq":
@@ -393,6 +393,17 @@ final class Automation {
             case "switch":
                 app.switchWorkspace(args[0])
                 return json(["current": app.currentWorkspaceEntry?.id ?? ""])
+            case "typeinto":
+                // Types into the open editor as AppKit text input would, then commits (IME-like path).
+                let sp = arg.split(separator: " ", maxSplits: 1).map(String.init)
+                c.selection = [sp[0]]
+                if c.editor?.objectID != sp[0] { c.beginEditing(sp[0]) }
+                guard let ed = c.editor else { return json(["error": "no editor"]) }
+                ed.textView.setSelectedRange(NSRange(location: (ed.textView.string as NSString).length, length: 0))
+                ed.textView.setMarkedText(sp[1], selectedRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+                ed.textView.insertText(sp[1], replacementRange: NSRange(location: NSNotFound, length: 0))
+                ed.commit()
+                return json(["text": ws.object(sp[0])?.text ?? "", "editor": ed.textView.string])
             case "identity":
                 return json(["id": app.identity.id, "name": app.identity.name])
             case "flush":

@@ -498,6 +498,7 @@ final class Collaboration: NSObject {
         guard let obj = ws.object(o) else { return }
         if obj.kind == .browser { app.browsers.deliver(e, to: o); return }
         if let r = inject(e, into: o) {
+            Diagnostics.record("control", "remote input paused: \(r)")
             arb.pause(r)
             arbiters[o] = arb
             peer.send(WireMessage("input-rejected", ["o": o, "reason": r]))
@@ -549,8 +550,9 @@ final class Collaboration: NSObject {
     func topWindowOwner(at p: CGPoint) -> pid_t? {
         guard let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
         for w in info {
-            guard let layer = w[kCGWindowLayer as String] as? Int, layer < 25, let b = w[kCGWindowBounds as String] as? [String: Double],
-                  let pid = w[kCGWindowOwnerPID as String] as? pid_t else { continue }
+            // Dock (20) and system layers span the screen without taking clicks; our own panels are not targets.
+            guard let layer = w[kCGWindowLayer as String] as? Int, layer < 20, let b = w[kCGWindowBounds as String] as? [String: Double],
+                  let pid = w[kCGWindowOwnerPID as String] as? pid_t, pid != ProcessInfo.processInfo.processIdentifier else { continue }
             let r = CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0)
             if (w[kCGWindowAlpha as String] as? Double ?? 1) < 0.05 { continue }
             if r.contains(p) { return pid }
