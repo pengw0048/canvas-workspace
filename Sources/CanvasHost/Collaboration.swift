@@ -667,6 +667,19 @@ final class Collaboration: NSObject {
             var up = down; up.keyDown = false
             return inject(down, into: o) ?? inject(up, into: o)
         }
+        // A shared browser runtime lives in this process: text goes straight into the page, no clipboard.
+        if ws.object(o)?.kind == .browser {
+            guard m.type == "transfer-text" else {
+                p.send(WireMessage("transfer-result", ["ok": "0", "reason": "This browser session accepts text transfers only"]))
+                return
+            }
+            var e = RemoteInputEvent(kind: .text)
+            e.text = String(data: m.payload, encoding: .utf8) ?? ""
+            app.browsers.deliver(e, to: o)
+            Diagnostics.record("transfer", "text \(e.text?.count ?? 0) chars into browser session")
+            p.send(WireMessage("transfer-result", ["ok": "1", "reason": "Inserted \(e.text?.count ?? 0) characters into the page"]))
+            return
+        }
         switch m.type {
         case "transfer-text":
             let text = String(data: m.payload, encoding: .utf8) ?? ""
