@@ -81,6 +81,13 @@ Highlighter (M), Eraser (E), Frame (F). Double-click empty canvas to type text.
 - If windows ever end up out of reach (for example after unplugging a display), use
   Window → Bring Managed Windows onto a Display.
 
+## Screen recording confirmation
+
+macOS periodically asks whether Canvas Workspace may "bypass the system private window picker and
+directly access your screen". Previews, captures, and live views capture specific windows without
+the system picker, so this confirmation is expected. Choose Allow to keep them working; if you
+decline, the canvas keeps working and surfaces show "Allow screen recording" instead of new previews.
+
 ## Shortcuts you can change
 
 The global shortcuts are read from user defaults; for example:
