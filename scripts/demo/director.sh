@@ -21,7 +21,9 @@ allowed='^(latency-chart.png|sample.png|Launch review.rtfd|metrics.csv.txt|data.
 others=$($aw | sed 's/^[^|]*| //' | grep -Ev "$allowed")
 if [[ -n "$others" ]]; then echo "refusing to reset: other TextEdit/Preview windows are open:"; echo "$others"; exit 1; fi
 pkill -x TextEdit; pkill -x Preview; sleep 1.5
-open -a TextEdit $FX/metrics.csv.txt; open -a Preview $FX/latency-chart.png; open -a TextEdit "$FX/Launch review.rtfd"; sleep 3
+# Relaunch without restoring earlier windows.
+open -a TextEdit $FX/metrics.csv.txt --args -ApplePersistenceIgnoreState YES; sleep 1.5
+open -a Preview $FX/latency-chart.png --args -ApplePersistenceIgnoreState YES; open -a TextEdit "$FX/Launch review.rtfd"; sleep 3
 rm -f $HS $CS
 CANVAS_DATA_DIR=$W $root/.build/debug/CanvasWorkspace --automation --profile demo > $W/demo.log 2>&1 &
 until [[ -S $HS ]] && h state 2>/dev/null | grep -q objects; do sleep 0.2; done; sleep 1
