@@ -3,7 +3,7 @@ import CanvasCore
 import QuartzCore
 
 enum Tool: String, CaseIterable {
-    case pointer, hand, text, sticky, rect, ellipse, line, arrow, connector, pen, highlighter, frame
+    case pointer, hand, text, sticky, rect, ellipse, line, arrow, connector, pen, highlighter, eraser, frame
 
     var symbol: String {
         switch self {
@@ -18,6 +18,7 @@ enum Tool: String, CaseIterable {
         case .connector: return "point.topleft.down.to.point.bottomright.curvepath"
         case .pen: return "pencil.tip"
         case .highlighter: return "highlighter"
+        case .eraser: return "eraser"
         case .frame: return "number"
         }
     }
@@ -35,6 +36,7 @@ enum Tool: String, CaseIterable {
         case .connector: return "c"
         case .pen: return "p"
         case .highlighter: return "m"
+        case .eraser: return "e"
         case .frame: return "f"
         }
     }
@@ -52,6 +54,7 @@ enum Tool: String, CaseIterable {
         case .connector: return "Connector (C)"
         case .pen: return "Pen (P)"
         case .highlighter: return "Highlighter (M)"
+        case .eraser: return "Eraser (E)"
         case .frame: return "Frame (F)"
         }
     }
@@ -66,6 +69,7 @@ enum DragOp {
     case rotate(id: ObjectID, start: Geometry, startAngle: Double)
     case create(tool: Tool, start: WPoint)
     case ink(points: [WPoint])
+    case erase(ids: Set<ObjectID>)
     case connector(start: Endpoint, current: WPoint)
     case region(objectID: ObjectID, start: CGPoint, current: CGPoint)
 }

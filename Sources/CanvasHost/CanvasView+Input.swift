@@ -56,6 +56,7 @@ extension CanvasView {
         switch tool {
         case .pointer: pointerDown(e, vp: vp, wp: wp)
         case .pen, .highlighter: drag = .ink(points: [wp])
+        case .eraser: drag = .erase(ids: []); eraseAt(wp)
         case .connector:
             let hit = ws.hitTest(wp, zoom: camera.zoom, includeFrameInterior: true).first { $0.kind != .connector }
             drag = .connector(start: endpoint(for: hit, at: wp), current: wp)
@@ -113,6 +114,10 @@ extension CanvasView {
             selection = [target]
         }
         let ids = Array(selection).filter { ws.object($0)?.kind != .connector || selection.count == 1 }
+        if let who = app.collab?.claimedByOther(ws.movingSet(ids.isEmpty ? [target] : ids)) {
+            hud.flash("\(who) is moving this right now. Try again in a moment.")
+            return
+        }
         drag = .move(ids: ids.isEmpty ? [target] : ids, start: wp, moved: false)
     }
 
@@ -173,11 +178,23 @@ extension CanvasView {
         case .region(let id, let s, _):
             drag = .region(objectID: id, start: s, current: vp)
             updateOverlay()
+        case .erase:
+            eraseAt(wp)
         case .create:
             updateOverlay()
         case .none:
             break
         }
+    }
+
+    /// Eraser: ink strokes under the pointer are marked, then removed on release.
+    func eraseAt(_ wp: WPoint) {
+        guard case .erase(var ids) = drag else { return }
+        for o in ws.hitTest(wp, zoom: camera.zoom) where o.kind == .ink && !ids.contains(o.id) {
+            ids.insert(o.id)
+            renderer.layers[o.id]?.opacity = 0.25
+        }
+        drag = .erase(ids: ids)
     }
 
     func dropHint(ids: [ObjectID], option: Bool, dx: Double, dy: Double) -> String? {
@@ -279,6 +296,11 @@ extension CanvasView {
                 regionTarget = nil
                 if r.width > 4 && r.height > 4 { app.captureRegion(objectID: id, viewRect: r, in: self) }
                 else { hud.flash("Capture canceled") }
+            case .erase(let ids):
+                // The whole gesture is one undoable removal of the touched strokes.
+                if !ids.isEmpty { try ws.removeFromCanvas(Array(ids)) }
+                renderer.transientOffset = [:]
+                for (_, l) in renderer.layers { l.opacity = 1 }
             case .marquee, .pan:
                 updateCursor()
             case .none:

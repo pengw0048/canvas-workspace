@@ -86,6 +86,7 @@ extension CanvasView: NSMenuItemValidation {
                 m.add("Relink…") { self.app.files.relink(o.id) }
                 m.add("Duplicate file on disk…") { self.app.files.duplicateOnDisk(o.id, in: self) }
                 m.add("Import a managed copy") { self.app.files.importManagedCopy(o.id, in: self) }
+                m.add("Move source file to Trash…") { self.app.files.moveSourceToTrash(o.id) }
             case .image:
                 if o.props.captureID != nil || o.props.sourceID != nil {
                     m.add("Reveal source") { self.app.revealSource(of: o.id, in: self) }

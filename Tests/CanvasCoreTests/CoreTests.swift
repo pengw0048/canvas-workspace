@@ -253,3 +253,59 @@ final class Pair {
     #expect(p.a.object(n.id)?.text == "Alice: Research notes (Bob)")
     #expect(p.b.object(n.id)?.text == "Alice: Research notes (Bob)")
 }
+
+@Test func removedConnectorTargetLeavesMarkedFreeEndpoint() throws {
+    let s = try WorkspaceSession(directory: tempDir(), user: "a")
+    let ws = s.workspace
+    let a = note(0, 0), b = note(300, 0)
+    var c = CanvasObject(kind: .connector, geom: Geometry(x: 0, y: 0, w: 1, h: 1))
+    c.props.start = Endpoint(objectID: a.id, anchor: WPoint(x: 1, y: 0.5))
+    c.props.end = Endpoint(objectID: b.id, anchor: WPoint(x: 0, y: 0.5))
+    try ws.perform("c") { $0.create(a); $0.create(b); $0.create(c) }
+    try ws.removeFromCanvas([b.id])
+    let e = ws.connectorEndpoint(ws.object(c.id)!.props.end)
+    #expect(e.missing && e.point == WPoint(x: 300, y: 50))
+    #expect(ws.object(c.id) != nil)
+    try ws.undo()
+    #expect(!ws.connectorEndpoint(ws.object(c.id)!.props.end).missing)
+}
+
+@Test func frameMoveCarriesDescendantsAndRejectsCycles() throws {
+    let s = try WorkspaceSession(directory: tempDir(), user: "a")
+    let ws = s.workspace
+    let outer = CanvasObject(kind: .frame, geom: Geometry(x: 0, y: 0, w: 1000, h: 1000))
+    var inner = CanvasObject(kind: .frame, geom: Geometry(x: 100, y: 100, w: 400, h: 400)); inner.parent = outer.id
+    var n = note(150, 150); n.parent = inner.id
+    let outside = note(2000, 0)
+    try ws.perform("c") { $0.create(outer); $0.create(inner); $0.create(n); $0.create(outside) }
+    try ws.move([outer.id], dx: 10, dy: 0)
+    #expect(ws.object(n.id)?.geom.x == 160 && ws.object(inner.id)?.geom.x == 110 && ws.object(outside.id)?.geom.x == 2000)
+    // Resizing a frame changes its boundary, not its members.
+    try ws.setGeometry(inner.id, Geometry(x: 110, y: 100, w: 50, h: 50))
+    #expect(ws.object(n.id)?.geom.w == 100)
+    // Dropping a frame into its own descendant is ignored.
+    try ws.move([outer.id], dx: 0, dy: 0, reparent: .some(inner.id))
+    #expect(ws.object(outer.id)?.parent == nil)
+    // The ignored reparent recorded nothing, so two undos reverse the resize and the move.
+    try ws.undo(); try ws.undo()
+    #expect(ws.object(n.id)?.geom.x == 150)
+}
+
+@Test func copySemanticsForFilesAppsAndConnectors() throws {
+    let s = try WorkspaceSession(directory: tempDir(), user: "a")
+    let ws = s.workspace
+    var file = CanvasObject(kind: .file, geom: Geometry(x: 0, y: 0, w: 200, h: 200)); file.props.sourceID = "src-1"
+    var app = CanvasObject(kind: .app, geom: Geometry(x: 300, y: 0, w: 400, h: 300)); app.props.previewAssetID = "asset-1"; app.props.sourceID = "src-2"
+    let other = note(900, 0)
+    var conn = CanvasObject(kind: .connector, geom: Geometry(x: 0, y: 0, w: 1, h: 1))
+    conn.props.start = Endpoint(objectID: file.id); conn.props.end = Endpoint(objectID: other.id)
+    try ws.perform("c") { $0.create(file); $0.create(app); $0.create(other); $0.create(conn) }
+    let sel = try #require(ws.portable([file.id, app.id]))
+    // File copies stay references to the same source; app surfaces become frozen visuals.
+    #expect(sel.objects.contains { $0.kind == .file && $0.props.sourceID == "src-1" })
+    #expect(sel.objects.contains { $0.kind == .image && $0.props.assetID == "asset-1" })
+    // A connector to an unselected object is not copied implicitly.
+    #expect(!sel.objects.contains { $0.kind == .connector })
+    let ids = try ws.paste(sel, topLeft: WPoint(x: 0, y: 500))
+    #expect(Set(ids).isDisjoint(with: [file.id, app.id]))
+}
