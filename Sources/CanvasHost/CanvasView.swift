@@ -158,6 +158,7 @@ final class CanvasView: NSView, SceneContext {
     var sceneAppearance: NSAppearance { effectiveAppearance }
     func image(for asset: AssetID?, pixels: Double) -> CGImage? { app.images.image(asset, pixels: pixels) }
     func surfaceImage(for o: CanvasObject, pixels: Double) -> CGImage? { app.runtime.surfaceImage(for: o, pixels: pixels) }
+    func surfaceContents(for o: CanvasObject, pixels: Double) -> Any? { app.runtime.surfaceContents(for: o, pixels: pixels) }
     func thumbnail(for o: CanvasObject) -> CGImage? { app.files.thumbnail(for: o) }
     func icon(for o: CanvasObject) -> NSImage? { app.runtime.icon(for: o) }
     func status(for o: CanvasObject) -> SurfaceStatus? { app.runtime.status(for: o) }

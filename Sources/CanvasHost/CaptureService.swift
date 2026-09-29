@@ -37,21 +37,23 @@ final class LiveStream: NSObject, SCStreamOutput, SCStreamDelegate {
     let objectID: ObjectID
     var stream: SCStream?
     weak var owner: CaptureService?
-    let ciContext = CIContext()
     var visible = true
+    var config = SCStreamConfiguration()
+    /// Full window size in pixels and the longest side currently requested.
+    var fullSize = CGSize.zero
+    var bucket = 0
 
     init(objectID: ObjectID) { self.objectID = objectID }
 
+    /// Frames stay IOSurface-backed pixel buffers; nothing is copied unless a still image is needed.
     func stream(_ stream: SCStream, didOutputSampleBuffer sb: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen, sb.isValid,
               let attach = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let raw = attach.first?[.status] as? Int, SCFrameStatus(rawValue: raw) == .complete,
               let pb = CMSampleBufferGetImageBuffer(sb) else { return }
-        let ci = CIImage(cvPixelBuffer: pb)
-        guard let img = ciContext.createCGImage(ci, from: ci.extent) else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self, let owner = self.owner else { return }
-            owner.app.runtime.didReceiveFrame(img, for: self.objectID)
+            owner.app.runtime.didReceiveLiveFrame(pb, for: self.objectID)
         }
     }
 
@@ -305,8 +307,13 @@ final class CaptureService {
                 cfg.showsCursor = false
                 cfg.queueDepth = 3
                 cfg.ignoreShadowsSingleWindow = true
+                cfg.backgroundColor = .clear
+                cfg.pixelFormat = kCVPixelFormatType_32BGRA
                 let ls = LiveStream(objectID: id)
                 ls.owner = self
+                ls.config = cfg
+                ls.fullSize = CGSize(width: cfg.width, height: cfg.height)
+                ls.bucket = max(cfg.width, cfg.height)
                 let s = SCStream(filter: filter, configuration: cfg, delegate: ls)
                 try s.addStreamOutput(ls, type: .screen, sampleHandlerQueue: queue)
                 try await s.startCapture()
@@ -327,14 +334,20 @@ final class CaptureService {
         ls.stream?.stopCapture { _ in }
     }
 
-    /// Offscreen live surfaces drop to 1 fps; the application itself is never paused.
-    func setLiveBudget(_ id: ObjectID, visible: Bool) {
-        guard let ls = streams[id], ls.visible != visible, let s = ls.stream else { return }
+    /// Offscreen live surfaces drop to 1 fps and on-screen ones stream at the size they are shown;
+    /// the application itself is never paused.
+    func setLiveBudget(_ id: ObjectID, visible: Bool, pixels: Double) {
+        guard let ls = streams[id], let s = ls.stream, ls.fullSize.width > 0 else { return }
+        let full = max(ls.fullSize.width, ls.fullSize.height)
+        let want = min(Int(full), ImageCache.bucket(for: pixels * 1.2))
+        guard ls.visible != visible || ls.bucket != want else { return }
         ls.visible = visible
-        let cfg = SCStreamConfiguration()
-        cfg.minimumFrameInterval = CMTime(value: 1, timescale: visible ? 15 : 1)
-        cfg.showsCursor = false
-        s.updateConfiguration(cfg) { _ in }
+        ls.bucket = want
+        let k = Double(want) / Double(full)
+        ls.config.width = max(64, Int(ls.fullSize.width * k))
+        ls.config.height = max(64, Int(ls.fullSize.height * k))
+        ls.config.minimumFrameInterval = CMTime(value: 1, timescale: visible ? 15 : 1)
+        s.updateConfiguration(ls.config) { _ in }
     }
 }
 

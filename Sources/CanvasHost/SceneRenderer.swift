@@ -8,6 +8,8 @@ protocol SceneContext: AnyObject {
     func image(for asset: AssetID?, pixels: Double) -> CGImage?
     /// Current visual for a runtime-backed object (live frame or stored preview).
     func surfaceImage(for o: CanvasObject, pixels: Double) -> CGImage?
+    /// Live IOSurface or still image for a runtime-backed object.
+    func surfaceContents(for o: CanvasObject, pixels: Double) -> Any?
     func thumbnail(for o: CanvasObject) -> CGImage?
     func icon(for o: CanvasObject) -> NSImage?
     /// Short consequential status such as "Live", "Last captured 5 min ago", "Source missing".
@@ -174,6 +176,15 @@ final class SceneRenderer {
     /// Longest side in device pixels that an image of this object needs at the current zoom.
     func pixelsNeeded(_ o: CanvasObject) -> Double {
         max(o.geom.w, o.geom.h) * camera.zoom * Double(backingScale)
+    }
+
+    /// Swaps only the pixels of live surfaces; no other layer work happens per frame.
+    func setLiveContents(_ surface: IOSurface?, for ids: [ObjectID]) {
+        guard let surface else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for id in ids { if let l = layers[id], !l.evicted, !l.image.isHidden { l.image.contents = surface } }
+        CATransaction.commit()
     }
 
     func textScale(_ o: CanvasObject) -> CGFloat {
@@ -367,7 +378,7 @@ final class SceneRenderer {
             l.image.frame = full
             l.image.contentsGravity = .resize
             l.bucket = ImageCache.bucket(for: pixelsNeeded(o))
-            l.image.contents = context?.image(for: o.props.assetID, pixels: pixelsNeeded(o))
+            l.image.contents = o.props.liveOf != nil ? context?.surfaceContents(for: o, pixels: pixelsNeeded(o)) : context?.image(for: o.props.assetID, pixels: pixelsNeeded(o))
             l.image.backgroundColor = l.image.contents == nil ? NSColor.quaternaryLabelColor.cg(ap) : nil
             if l.image.contents == nil {
                 setLabel(l.label, "Image bytes unavailable", frame: full.insetBy(dx: 8, dy: 8), size: 12, color: Theme.secondaryText)
@@ -511,7 +522,7 @@ final class SceneRenderer {
             l.image.contentsGravity = o.kind == .file ? .resizeAspect : .resizeAspect
             l.image.cornerRadius = o.kind == .file ? 4 : 0
             l.bucket = ImageCache.bucket(for: pixelsNeeded(o))
-            let img = o.kind == .file ? context?.thumbnail(for: o) : context?.surfaceImage(for: o, pixels: pixelsNeeded(o))
+            let img: Any? = o.kind == .file ? context?.thumbnail(for: o) : context?.surfaceContents(for: o, pixels: pixelsNeeded(o))
             l.image.contents = img
             l.image.backgroundColor = o.kind == .file ? nil : NSColor.textBackgroundColor.cg(ap)
             if img == nil {

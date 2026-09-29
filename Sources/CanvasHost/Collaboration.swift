@@ -696,9 +696,13 @@ final class Collaboration: NSObject {
     }
 
     /// Publishes a live frame to members of the object's scope only.
-    func surfaceFrame(_ img: CGImage, for id: ObjectID) {
+    func surfaceFrame(_ img: CGImage, for id: ObjectID) { surfaceFrame(for: id) { img } }
+
+    /// Publishes a live frame; the image is only produced when a frame is actually due.
+    func surfaceFrame(for id: ObjectID, make: () -> CGImage?) {
         guard liveShared.contains(id), let o = ws.object(id), shares[o.scope]?.hosted == true else { return }
         if let t = lastFrameSent[id], Date().timeIntervalSince(t) < 1.0 / 15 { return }
+        guard peers.contains(where: { $0.scopes.contains(o.scope) }), let img = make() else { return }
         lastFrameSent[id] = Date()
         // JPEG has no alpha: flatten onto white so window corners do not turn black.
         var src = img

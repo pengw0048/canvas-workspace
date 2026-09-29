@@ -131,8 +131,8 @@ and identities on the same Mac, connected over loopback TLS-PSK. **Simulated:** 
 
 Measured with the release build on the test Mac, windowed 1280×820 at 2×, automation-driven
 (`populate 500`, `bench 600`): 500 objects (150 notes, 100 text, 100 shapes, 100 ink, 50 images
-with distinct 1600×1000 stored previews). Live surfaces and a second participant were not part of
-this run.
+with distinct 1600×1000 stored previews), then the same scene plus three live window surfaces.
+A second participant was not part of the timing runs.
 
 | Measure | Result | Target |
 | --- | --- | --- |
@@ -140,11 +140,13 @@ this run.
 | Reopen the saved 500-object scene to responding | 0.48 s | ≤ 1 s |
 | Memory: empty workspace / 500 objects fit-all / after touring zoom levels | 31 MB / 80 MB / 140–220 MB | — |
 | Stored asset bytes for 50 previews (PNG) | 1.8 MB | — |
+| With three live window surfaces (TextEdit ×2, Preview): process CPU / memory / camera frame p95 | 5–7 % / 125–235 MB / 10 ms | — |
 
 This measures main-thread work, not presented display frames. Memory work so far: images decode
 at on-screen size buckets with a 64 MB budget, offscreen objects drop their pixels, shadows use
-explicit paths, and text rasterizes at on-screen resolution. Before these changes the same scene
-used 825 MB.
+explicit paths, and text rasterizes at on-screen resolution. Live frames stay IOSurface-backed
+(no per-frame image conversion) and stream at the size they are shown. Before these changes the
+same scene used 825 MB, and three live surfaces used 100 % CPU and 1.2 GB.
 
 ## Next steps
 

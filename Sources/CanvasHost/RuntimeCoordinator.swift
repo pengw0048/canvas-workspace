@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import CanvasCore
+import CoreImage
 
 /// How much of an application's context can be continued (§8.3).
 enum RecoveryDepth: String {
@@ -90,6 +91,7 @@ final class RuntimeCoordinator: NSObject {
     func surfaceImage(for o: CanvasObject, pixels: Double = 2048) -> CGImage? {
         if o.kind == .browser { return app.collab?.remoteFrame(o.id) ?? app.browsers.frame(for: o) ?? app.images.image(o.props.previewAssetID, pixels: pixels) }
         if let f = frames[o.id] { return f }
+        if let l = liveImage(o.id) { return l }
         if let r = app.collab?.remoteFrame(o.id) { return r }
         return app.images.image(o.props.previewAssetID, pixels: pixels)
     }
@@ -472,7 +474,9 @@ final class RuntimeCoordinator: NSObject {
         bindings[id] = nil
         liveObjects.remove(id)
         app.capture.stopLive(id)
-        frames[id] = nil
+        frames[id] = liveImage(id)
+        liveBuffers[id] = nil
+        liveImageCache[id] = nil
         state[id] = .disconnected
         if activeObject == id { activeObject = nil; returnPanel?.orderOut(nil); activeCanvas?.exitFocusView() }
         app.collab?.runtimeLost(id)
@@ -714,6 +718,9 @@ final class RuntimeCoordinator: NSObject {
         if liveObjects.contains(id) {
             liveObjects.remove(id)
             app.capture.stopLive(id)
+            if let img = liveImage(id) { frames[id] = img }
+            liveBuffers[id] = nil
+            liveImageCache[id] = nil
         } else if let b = verifiedBinding(id) {
             liveObjects.insert(id)
             app.capture.startLive(id, windowID: b.windowID)
@@ -739,6 +746,39 @@ final class RuntimeCoordinator: NSObject {
             }
             self.refreshAll(id)
         }
+    }
+
+    var liveBuffers: [ObjectID: CVPixelBuffer] = [:]
+    var liveImageCache: [ObjectID: (CVPixelBuffer, CGImage)] = [:]
+    let ciContext = CIContext(options: [.cacheIntermediates: false])
+
+    /// A still image of the current live frame, made only when something needs one (copy, capture, sharing).
+    func liveImage(_ id: ObjectID) -> CGImage? {
+        guard let pb = liveBuffers[id] else { return nil }
+        if let c = liveImageCache[id], c.0 === pb { return c.1 }
+        let ci = CIImage(cvPixelBuffer: pb)
+        guard let img = ciContext.createCGImage(ci, from: ci.extent) else { return nil }
+        liveImageCache[id] = (pb, img)
+        return img
+    }
+
+    /// Layer contents for a surface: the live IOSurface when streaming, else a still image.
+    func surfaceContents(for o: CanvasObject, pixels: Double) -> Any? {
+        let src = o.props.liveOf ?? o.id
+        if let pb = liveBuffers[src], let surf = CVPixelBufferGetIOSurface(pb) { return surf.takeUnretainedValue() }
+        if let so = o.props.liveOf.flatMap({ ws.object($0) }) { return surfaceImage(for: so, pixels: pixels) ?? app.images.image(o.props.assetID, pixels: pixels) }
+        return surfaceImage(for: o, pixels: pixels)
+    }
+
+    func didReceiveLiveFrame(_ pb: CVPixelBuffer, for id: ObjectID) {
+        guard liveObjects.contains(id) else { return }
+        liveBuffers[id] = pb
+        frameTimes[id] = Date()
+        frames[id] = nil
+        let surf = CVPixelBufferGetIOSurface(pb)?.takeUnretainedValue()
+        let views = ws.live.filter { $0.props.liveOf == id }.map(\.id)
+        for c in app.canvases { c.renderer.setLiveContents(surf, for: [id] + views) }
+        app.collab?.surfaceFrame(for: id) { [weak self] in self?.liveImage(id) }
     }
 
     func didReceiveFrame(_ img: CGImage, for id: ObjectID) {
@@ -770,7 +810,7 @@ final class RuntimeCoordinator: NSObject {
         let vis = c.camera.visibleWorld
         for id in liveObjects {
             guard let o = ws.object(id) else { continue }
-            app.capture.setLiveBudget(id, visible: vis.intersects(o.geom.bounds))
+            app.capture.setLiveBudget(id, visible: vis.intersects(o.geom.bounds), pixels: c.renderer.pixelsNeeded(o))
         }
     }
 
