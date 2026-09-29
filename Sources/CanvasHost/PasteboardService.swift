@@ -50,7 +50,8 @@ final class PasteboardService: NSObject {
     }
 
     /// Renders a selection at export resolution independent of the current zoom.
-    func renderComposition(_ ids: [ObjectID], scale: CGFloat = 2, background: NSColor? = .white) -> CGImage? {
+    func renderComposition(_ ids: [ObjectID], scale: CGFloat = 2, background: NSColor? = .white, in other: Workspace? = nil) -> CGImage? {
+        let ws = other ?? self.ws
         let set = ws.closure(ids)
         let objs = set.compactMap { ws.object($0) }.filter { $0.kind != .group }
         guard var b = WRect.union(objs.map { o -> WRect in

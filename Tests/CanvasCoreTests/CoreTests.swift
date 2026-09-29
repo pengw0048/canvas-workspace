@@ -326,3 +326,22 @@ final class Pair {
     try p.sync()
     #expect(p.b.object(n.id)?.marks.first { $0.name == "bold" }?.start == 5)
 }
+
+@Test func historicalArrangementPreviewsAndRestoresAsOneUndoableCommand() throws {
+    let s = try WorkspaceSession(directory: tempDir(), user: "a")
+    let ws = s.workspace
+    let n = note(0, 0, "v1")
+    try ws.perform("Create") { $0.create(n) }
+    let doc = ws.scopes[Scope.privateID]!
+    let mark = try #require(doc.history().first).hash
+    try ws.perform("Move") { $0.update(n.id) { $0.geom.x = 500; $0.text = "v2" } }
+    let later = note(900, 0, "later")
+    try ws.perform("Create") { $0.create(later) }
+    let past = try doc.state(at: mark)
+    #expect(past[n.id]?.geom.x == 0 && past[later.id] == nil)
+    #expect(ws.object(n.id)?.geom.x == 500)   // preview did not change the scene
+    try ws.restore(scope: Scope.privateID, to: past)
+    #expect(ws.object(n.id)?.geom.x == 0 && ws.object(n.id)?.text == "v1" && ws.object(later.id) == nil)
+    try ws.undo()
+    #expect(ws.object(n.id)?.geom.x == 500 && ws.object(later.id) != nil)
+}

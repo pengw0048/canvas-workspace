@@ -34,6 +34,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var inspector: InspectorPanel?
     var search: SearchPanel?
     var saveRetry: Timer?
+    var history: HistoryPanel?
 
     init(profile: String, windowed: Bool) {
         self.profile = profile
@@ -319,6 +320,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let i = inspector, i.panel.isVisible { i.panel.orderOut(nil) } else if let c = activeCanvas { inspect(nil, in: c) }
     }
 
+    @objc func showHistory(_ s: Any?) {
+        if history == nil { history = HistoryPanel(app: self) }
+        let sel = activeCanvas?.selection.first.flatMap { workspace.object($0)?.scope } ?? Scope.privateID
+        history?.show(scope: sel)
+    }
+
     @objc func showSearch(_ s: Any?) {
         if search == nil { search = SearchPanel(app: self) }
         if let c = activeCanvas { search?.show(in: c) }
@@ -418,6 +425,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         m.addItem(.separator())
         m.add("Collaboration…") { self.collab?.showPanel() }
         m.add("Inspector") { self.toggleInspector(nil) }
+        m.add("History…") { self.showHistory(nil) }
         m.add("Bring managed windows onto a display") { self.recoverWindows(nil) }
         m.add("Export workspace…") { self.exportWorkspace(nil) }
         m.addItem(.separator())
@@ -491,6 +499,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             item(m, "Back", #selector(CanvasView.backAction(_:)), "[", [.command, .option])
             m.addItem(.separator())
             item(m, "Inspector", #selector(toggleInspector(_:)), "i", [.command, .option], target: self)
+            item(m, "Workspace History…", #selector(showHistory(_:)), "y", [.command, .shift], target: self)
             item(m, "Collaboration…", #selector(Collaboration.showPanelAction(_:)), "k", [.command, .shift], target: collab)
         }
         top("Window") { m in

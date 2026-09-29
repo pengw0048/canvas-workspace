@@ -373,6 +373,19 @@ final class Automation {
                 return json(["frames": frames, "p50_ms": pct(0.5), "p95_ms": pct(0.95), "max_ms": sorted.last ?? 0, "over_100ms": times.filter { $0 > 100 }.count,
                              "detail_refresh_ms": (CACurrentMediaTime() - t1) * 1000, "objects": ws.live.count,
                              "rss_mb": Double(Self.residentBytes()) / 1_048_576])
+            case "history":
+                app.showHistory(nil)
+                let n = Int(args.first ?? "") ?? -1
+                if n >= 0, let h = app.history { h.table.selectRowIndexes([n], byExtendingSelection: false) }
+                return json(["entries": app.history?.entries.prefix(8).map { "\($0.name) @ \($0.time)" } ?? [], "info": app.history?.info.stringValue ?? ""])
+            case "historyshot":
+                guard let img = app.history?.preview.image, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+                      let png = rep.representation(using: .png, properties: [:]) else { return json(["error": "no preview"]) }
+                try png.write(to: URL(fileURLWithPath: arg))
+                return json(["path": arg])
+            case "historyrestore":
+                app.history?.restore()
+                return json(["ok": true])
             case "identity":
                 return json(["id": app.identity.id, "name": app.identity.name])
             case "flush":
