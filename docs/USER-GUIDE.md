@@ -26,6 +26,11 @@ Highlighter (M), Eraser (E), Frame (F). Double-click empty canvas to type text.
 - Right-click for Arrange (front/back, align, distribute, Tidy…), Select behind, Group, Inspect.
 - ⌘Z undoes your own changes. If someone else changed the same thing later, undo keeps their
   change and tells you.
+- Tab and ⇧Tab move the selection through objects in reading order; Return activates or edits.
+- In notes and text objects, ⌘B and ⌘I format text and ⌘K adds a link.
+- Workspace → History… previews an earlier arrangement; Restore applies it as one undoable step.
+  Application actions, websites, and external files are not part of this history.
+- Workspace → Workspaces switches between separate canvases or creates a new one.
 
 ## Applications and files
 
@@ -33,8 +38,9 @@ Highlighter (M), Eraser (E), Frame (F). Double-click empty canvas to type text.
 - **Activate**: double-click the surface or press Return. The view zooms to 1:1, the real window
   moves to the surface's place, and the app owns the keyboard, menus, and clipboard.
 - **Return to the canvas**: ⌃⌥Space, the "Return to canvas" button, or click the canvas.
-- **Capture**: right-click → Capture window, or Capture region… and drag the area. The capture
-  appears next to the source, selected, ready to annotate or copy.
+- **Capture**: right-click → Capture window, or Capture region… and drag the area. ⌃⌥C captures
+  the active application, or the frontmost window of another app. The capture appears next to the
+  source, selected, ready to annotate or copy.
 - **Files** are references to the real file. Removing one from the canvas never deletes the file.
   "Duplicate file on disk…" makes a real copy; "Import a managed copy" stores a copy in the workspace.
 - Removing an application surface from the canvas leaves the app running.
@@ -52,7 +58,9 @@ Highlighter (M), Eraser (E), Frame (F). Double-click empty canvas to type text.
 - ⌘C / ⌘V use the system clipboard. Text stays text; a mixed selection pastes as one image into
   image-capable apps. Right-click offers Copy as image, Copy text, Copy link.
 - Drag the small arrow grip next to a selected object to drag its content into another app or to
-  Finder (compositions arrive as PNG files). Dragging the object itself only moves it on the canvas.
+  Finder (compositions arrive as PNG files). Hold the drag over an application surface for half a
+  second and its real window comes forward to receive the drop. Dragging the object itself only
+  moves it on the canvas.
 - Drop files, images, text, or links onto the canvas to place them.
 
 ## Sharing
@@ -62,6 +70,7 @@ Highlighter (M), Eraser (E), Frame (F). Double-click empty canvas to type text.
 - Others join with the invite code (Collaboration panel, ⇧⌘K). Everyone has their own view.
 - A collaborator can ask for control of a shared application. You grant it explicitly; using the
   app yourself, the Reclaim button, or ⌃⌥⌘R takes control back immediately.
+- The host can make a member view-only or let them edit again from the Collaboration panel.
 - Stopping sharing prevents future updates; it cannot recall copies someone already made.
 
 ## Leaving
@@ -71,3 +80,15 @@ Highlighter (M), Eraser (E), Frame (F). Double-click empty canvas to type text.
 - **Hide canvas** leaves the canvas running in the background.
 - If windows ever end up out of reach (for example after unplugging a display), use
   Window → Bring Managed Windows onto a Display.
+
+## Shortcuts you can change
+
+The global shortcuts are read from user defaults; for example:
+
+```sh
+defaults write io.github.pengw0048.canvasworkspace hostCommand "ctrl+opt+space"
+defaults write io.github.pengw0048.canvasworkspace captureCommand "ctrl+opt+c"
+defaults write io.github.pengw0048.canvasworkspace reclaimCommand "ctrl+opt+cmd+r"
+```
+
+If another app already owns a shortcut, the host records it in Workspace → Export diagnostics….
