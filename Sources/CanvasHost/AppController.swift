@@ -142,6 +142,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         workspace.onSaveState = { [weak self] s in self?.saveStateChanged(s) }
         buildWindows()
         runtime.startupScan()
+        if !windowed { NSApp.presentationOptions = [.autoHideMenuBar] }
         if let e = currentWorkspaceEntry {
             UserDefaults.standard.set(e.id, forKey: "lastWorkspace.\(profile)")
             for w in windows { w.title = e.name }
@@ -231,7 +232,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 frame = NSRect(x: v.minX + 60, y: v.minY + 60, width: min(1280, v.width - 120), height: min(820, v.height - 120))
                 style = [.titled, .closable, .resizable, .miniaturizable]
             } else {
-                frame = screen.visibleFrame
+                // The menu bar auto-hides while the canvas is frontmost, so the canvas reaches the top edge.
+                // The Dock stays reachable.
+                let v = screen.visibleFrame
+                frame = NSRect(x: v.minX, y: v.minY, width: v.width, height: screen.frame.maxY - v.minY)
                 style = [.borderless]
             }
             let w = CanvasWindow(contentRect: frame, styleMask: style, backing: .buffered, defer: false)

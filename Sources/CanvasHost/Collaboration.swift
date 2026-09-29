@@ -623,9 +623,10 @@ final class Collaboration: NSObject {
                 var c = ch
                 for down in [true, false] {
                     // A letter key code makes some apps insert that letter instead of the Unicode string.
+                    // The HID path reaches the key window's first responder like real typing.
                     let ev = CGEvent(keyboardEventSource: nil, virtualKey: 0x31, keyDown: down)
                     ev?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &c)
-                    ev?.postToPid(b.pid)
+                    ev?.post(tap: .cghidEventTap)
                 }
             }
         }
