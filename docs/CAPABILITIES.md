@@ -72,8 +72,8 @@ arrives without the click (verified afterwards).
 | Personal camera per user and display, navigation back, focus view | Verified (camera restore) / Unverified (focus, back) | |
 | Search over text, titles, filenames, apps, URLs, named places | Unverified | |
 | Rich text formatting and links in text objects | Verified (render, marks sync, RTF/HTML copy, formatted paste) | Bold, italic, links as Automerge marks. ⌘B/⌘I/⌘K editing not exercised by a person. Formatting changes are not part of canvas undo. |
-| Workspace history preview (§8.5) | Not implemented | Undo history exists; historical arrangement preview does not. |
-| Multiple workspaces | Not implemented | One workspace per profile (`--profile`). |
+| Workspace history preview (§8.5) | Verified (unit, automation) | Workspace → History… previews a past arrangement read-only and restores it as one undoable command; later objects are tombstoned; previews are not replayed. |
+| Multiple workspaces | Verified (automation) | Create, switch, and reopen-last; each workspace has its own objects, sharing, and history. |
 
 ## Native integration (package A)
 
@@ -92,9 +92,9 @@ arrives without the click (verified afterwards).
 | IME input | Verified (canvas note, active TextEdit) | Japanese romaji input showed marked text and candidates and committed once, both in a canvas note and in the active TextEdit window. The first run exposed an editor re-entrancy crash (stack overflow, duplicated text); fixed and re-run with the real IME. |
 | A second unrelated application | Verified | Preview window admitted and activated at 1:1; Finder window admitted and used as a drop target. |
 | Surviving runtime reconnect after host restart (pid + window number + bundle; document check) | Verified | Host killed and relaunched; TextEdit window rebound, no duplicate. |
-| Reopen source by document path when the window is gone | Unverified | Document path comes from `AXDocument`; it now follows app-side renames while connected (found when TextEdit converted `.rtf` to `.rtfd`). |
+| Reopen source by document path when the window is gone | Verified | After closing the window, Reconnect reopened the document with its app, confirmed the document path before binding, and reported the depth reached. It follows app-side renames while connected (found when TextEdit converted `.rtf` to `.rtfd`). |
 | Ambiguous windows ask instead of matching titles | Unverified | |
-| Close application window through its normal close flow | Unverified — needs Accessibility | |
+| Close application window through its normal close flow | Verified | The saved deliverable window closed through its close button (no prompt needed); the canvas object stayed. |
 | Remove from canvas never terminates the runtime | Verified | TextEdit kept running across removal, host quit, and kill -9. |
 | Exit restores original placement; recovery onto a display | Verified (exit restore) / Unverified (display recovery) | After activation moved the window, Exit put it back at its original (214, 112). |
 | Multiple displays with independent cameras | Unverified | One display on the test Mac. |
