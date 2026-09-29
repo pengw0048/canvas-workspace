@@ -157,7 +157,7 @@ and identities on the same Mac, connected over loopback TLS-PSK. **Simulated:** 
 | Provider-collaborative document mode | Verified (labeling, no embedding) / Unverified (two provider accounts) | The object opens the link in each person's own browser; nothing is embedded and no credentials are copied. |
 | Purpose-built adapters, scroll-follow | Not implemented | |
 | View-only membership | Verified | A view-only member's editor refuses changes; a modified client that edits anyway has its changes ignored by the host (diagnostic recorded), so they never reach other members. Role changes reconnect the member. |
-| Runtime sharing from a member (not the session host) | Not implemented | Only the session host can share applications. |
+| Runtime sharing from a member (not the session host) | Verified (loopback) | The person who admits a window runs it. Maya's own Calculator streamed live to the host and to Bob through the host; the host and then Bob each got control and typed into it on Maya's Mac (12+3=15, 7×6=42). The host relays control and input between members and checks edit access; the owner's arbiter checks grants. |
 
 ## Performance (§14)
 

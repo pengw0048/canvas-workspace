@@ -139,6 +139,8 @@ final class Collaboration: NSObject {
     var videoCongested: Set<ObjectID> = []
     var lastAdapt: [ObjectID: Date] = [:]
     var lastKeyRequest: [ObjectID: Date] = [:]
+    /// Member side: the session host's user ID, from the welcome message.
+    var hostUserID: String?
     var lastInjection = Date.distantPast
     var reclaimTimer: Timer?
     // Participant side
@@ -233,7 +235,35 @@ final class Collaboration: NSObject {
     }
 
     func isRemoteObject(_ o: CanvasObject) -> Bool { shares[o.scope].map { !$0.hosted } ?? false }
-    func isRemoteSurface(_ o: CanvasObject) -> Bool { [.app, .browser].contains(o.kind) && isRemoteObject(o) && o.props.browserMode != .providerDocument && !(o.kind == .browser && o.props.browserMode == .reference) }
+    func isRemoteSurface(_ o: CanvasObject) -> Bool {
+        guard shares[o.scope] != nil else { return false }
+        if o.kind == .app { return runtimeOwner(o) != me }
+        return o.kind == .browser && isRemoteObject(o) && o.props.browserMode != .providerDocument && o.props.browserMode != .reference
+    }
+
+    /// Whose Mac runs an application surface: the person who admitted it. Browser runtimes live with the session host.
+    func runtimeOwner(_ o: CanvasObject) -> String {
+        if o.kind == .app, !o.author.isEmpty { return o.author }
+        return shares[o.scope]?.hosted == true ? me : (hostUserID ?? "")
+    }
+
+    /// Sends to one participant: directly when connected to them, otherwise through the session host.
+    func sendUser(_ user: String, _ m: WireMessage) {
+        var m = m
+        m.header["from"] = me
+        if let p = peers.first(where: { $0.userID == user }) { p.send(m); return }
+        guard let u = upstream, !u.closed else { return }
+        if user != hostUserID { m.header["to"] = user }
+        u.send(m)
+    }
+
+    /// Sends to everyone in the session, wherever this participant sits.
+    func sendAll(_ m: WireMessage) {
+        var m = m
+        m.header["from"] = me
+        for p in peers where p.userID != nil { p.send(m) }
+        if let u = upstream, !u.closed { m.header["to"] = "*"; u.send(m) }
+    }
     func isPublishingLive(_ id: ObjectID) -> Bool { liveShared.contains(id) }
     /// A still of the latest remote frame (thumbnails, copy as image).
     func remoteFrame(_ id: ObjectID) -> CGImage? {
@@ -263,15 +293,19 @@ final class Collaboration: NSObject {
     }
 
     func remoteSurfaceStatus(_ o: CanvasObject) -> SurfaceStatus? {
-        guard isRemoteObject(o) else { return nil }
-        let online = upstream.map { !$0.closed } ?? false
+        guard isRemoteObject(o) || (o.kind == .app && isRemoteSurface(o)) else { return nil }
+        let owner = runtimeOwner(o)
+        let online = shares[o.scope]?.hosted == true ? peers.contains { $0.userID == owner && !$0.closed } : (upstream.map { !$0.closed } ?? false)
         if !online {
             let t = shares[o.scope]?.lastContact.map { app.runtime.relative(Date(timeIntervalSince1970: $0)) } ?? "unknown"
-            return SurfaceStatus(text: "Host offline · last update \(t)", tone: .warning)
+            return SurfaceStatus(text: "\(owner == hostUserID || shares[o.scope]?.hosted != true ? "Host" : name(of: owner) ?? "Owner") offline · last update \(t)", tone: .warning)
         }
         if let g = myGrants[o.id], g > 0 { return SurfaceStatus(text: "You control · ⌃⌥Space releases", tone: .live) }
         if let c = controllers[o.id] { return SurfaceStatus(text: "\(name(of: c) ?? "Someone") controls", tone: .live) }
-        if let a = remoteFrameAge(o.id), a < 3 { return SurfaceStatus(text: "Live from host", tone: .live) }
+        if let a = remoteFrameAge(o.id), a < 3 {
+            let owner = runtimeOwner(o)
+            return SurfaceStatus(text: "Live from \(owner == hostUserID ? "host" : name(of: owner) ?? "a collaborator")", tone: .live)
+        }
         if let t = o.props.previewTime { return SurfaceStatus(text: "Shared visual from \(app.runtime.relative(Date(timeIntervalSince1970: t)))", tone: .normal) }
         return SurfaceStatus(text: "Shared visual", tone: .normal)
     }
@@ -446,9 +480,45 @@ final class Collaboration: NSObject {
     // MARK: Host message handling
 
     func hostReceive(_ p: Peer, _ m: WireMessage) {
+        // Messages between members pass through the host, stamped with the verified sender.
+        if let to = m["to"], let from = p.userID {
+            var f = m
+            f.header["from"] = from
+            if m.type == "control-request" {
+                guard let o = m["o"], let obj = ws.object(o), p.scopes.subtracting(p.viewOnly).contains(obj.scope) else {
+                    p.send(WireMessage("control-denied", ["o": m["o"] ?? "", "reason": "You do not have edit access to this surface"]))
+                    return
+                }
+                f.header["n"] = p.name ?? "A collaborator"
+            }
+            if to == "*" {
+                for q in peers where q !== p && q.userID != nil { q.send(f) }
+                clientControl(f)
+            } else if to == me {
+                clientControl(f)
+            } else if let q = peers.first(where: { $0.userID == to }) {
+                q.send(f)
+            }
+            return
+        }
         switch m.type {
+        case "vframe":
+            // A member streams a window it owns: show it here and pass it on.
+            guard let o = m["o"], let obj = ws.object(o), p.scopes.contains(obj.scope), p.userID == runtimeOwner(obj) else { return }
+            receiveVideo(m)
+            let key = m["k"] == "1"
+            for q in peers where q !== p && q.scopes.contains(obj.scope) {
+                if q.pendingSends >= 4 { q.videoBroken.insert(o); continue }
+                if q.videoBroken.contains(o) { guard key else { requestKey(o); continue }; q.videoBroken.remove(o) }
+                q.send(m)
+            }
+        case "control-granted", "control-denied", "input-rejected":
+            // Answers from a member who runs the application, addressed to the host.
+            guard let o = m["o"], let obj = ws.object(o), p.userID == runtimeOwner(obj) else { return }
+            clientControl(m)
         case "keyreq":
-            if let o = m["o"], let obj = ws.object(o), p.scopes.contains(obj.scope) { encoders[o]?.requestKeyframe() }
+            guard let o = m["o"], let obj = ws.object(o), p.scopes.contains(obj.scope) else { return }
+            if runtimeOwner(obj) == me { encoders[o]?.requestKeyframe() } else { requestKey(o) }
         case "hello":
             guard let u = m["user"], let n = m["name"] else { p.close(); return }
             // The TLS key proved the invite code of exactly one share; only that share is granted.
@@ -571,17 +641,18 @@ final class Collaboration: NSObject {
     func hostControlRequest(_ o: ObjectID, from u: String, name: String) {
         guard let obj = ws.object(obj: o) else { return }
         if obj.kind == .app && !NativeWindows.axTrusted {
-            send(to: u, WireMessage("control-denied", ["o": o, "reason": "Remote control is unavailable on the host: Accessibility permission is not granted"]))
+            sendUser(u, WireMessage("control-denied", ["o": o, "reason": "Remote control is unavailable on the host: Accessibility permission is not granted"]))
             return
         }
         if obj.kind == .app && app.runtime.verifiedBinding(o) == nil {
-            send(to: u, WireMessage("control-denied", ["o": o, "reason": "The host's application window is not connected"]))
+            sendUser(u, WireMessage("control-denied", ["o": o, "reason": "The host's application window is not connected"]))
             return
         }
         // Editors of the scope may operate its applications; the host is told and can reclaim at any time.
         app.activeCanvas?.hud.flash("\(name) is controlling “\(obj.title)”. Use it yourself or press ⌃⌥⌘R to take it back.", seconds: 4)
         // Never grant to a peer that has already left.
-        guard peers.contains(where: { $0.userID == u && !$0.closed }) else { return }
+        let present = peers.contains { $0.userID == u && !$0.closed } || (upstream.map { !$0.closed } ?? false) && presence[u] != nil
+        guard present else { return }
         var arb = arbiters[o] ?? ControlArbiter()
         let (g, release) = arb.grant(to: u)
         arbiters[o] = arb
@@ -589,8 +660,8 @@ final class Collaboration: NSObject {
         grantedAt[o] = Date()
         if obj.kind == .app, let c = app.activeCanvas { app.runtime.activate(o, in: c) }
         if obj.kind == .browser { _ = app.browsers.webView(for: o) }
-        send(to: u, WireMessage("control-granted", ["o": o, "g": "\(g)"]))
-        broadcast(WireMessage("control-state", ["o": o, "user": u]))
+        sendUser(u, WireMessage("control-granted", ["o": o, "g": "\(g)"]))
+        sendAll(WireMessage("control-state", ["o": o, "user": u]))
         if !liveShared.contains(o) { toggleLiveShare(o) }
         refreshUI()
     }
@@ -601,7 +672,7 @@ final class Collaboration: NSObject {
         let release = arb.revoke()
         arbiters[o] = arb
         releaseHeld(release, object: o)
-        broadcast(WireMessage("control-revoked", ["o": o, "reason": reason]))
+        sendAll(WireMessage("control-revoked", ["o": o, "reason": reason]))
         app.activeCanvas?.hud.flash("Control returned to you: \(reason)")
         app.runtime.refreshAll(o)
         refreshUI()
@@ -628,7 +699,7 @@ final class Collaboration: NSObject {
         let verdict = arb.check(from: u, generation: g, seq: s, event: e)
         arbiters[o] = arb
         guard verdict == .accept else {
-            if case .reject(let r) = verdict { peer.send(WireMessage("input-rejected", ["o": o, "reason": r])) }
+            if case .reject(let r) = verdict { sendUser(u, WireMessage("input-rejected", ["o": o, "reason": r])) }
             return
         }
         guard let obj = ws.object(o) else { return }
@@ -637,7 +708,7 @@ final class Collaboration: NSObject {
             Diagnostics.record("control", "remote input paused: \(r)")
             arb.pause(r)
             arbiters[o] = arb
-            peer.send(WireMessage("input-rejected", ["o": o, "reason": r]))
+            sendUser(u, WireMessage("input-rejected", ["o": o, "reason": r]))
         } else if arb.paused != nil {
             arb.pause(nil)
             arbiters[o] = arb
@@ -825,7 +896,7 @@ final class Collaboration: NSObject {
     }
 
     func toggleLiveShare(_ id: ObjectID) {
-        guard let o = ws.object(id), shares[o.scope]?.hosted == true else {
+        guard let o = ws.object(id), shares[o.scope] != nil, runtimeOwner(o) == me else {
             app.activeCanvas?.hud.flash("Move the application into a shared frame before sharing it live")
             return
         }
@@ -851,8 +922,8 @@ final class Collaboration: NSObject {
     /// Streams a shared window to members of its scope as H.264, like a video call:
     /// keyframes on request, and a congested member skips frames until the next keyframe.
     func surfaceVideo(_ pb: CVPixelBuffer, for id: ObjectID) {
-        guard liveShared.contains(id), let o = ws.object(id), shares[o.scope]?.hosted == true,
-              peers.contains(where: { $0.scopes.contains(o.scope) }) else { return }
+        guard liveShared.contains(id), let o = ws.object(id), shares[o.scope] != nil, runtimeOwner(o) == me,
+              peers.contains(where: { $0.scopes.contains(o.scope) }) || (upstream.map { !$0.closed } ?? false) else { return }
         if let t = lastFrameSent[id], Date().timeIntervalSince(t) < 1.0 / 30 { return }
         lastFrameSent[id] = Date()
         let enc = encoders[id] ?? {
@@ -868,7 +939,9 @@ final class Collaboration: NSObject {
         guard let o = ws.object(id), let enc = encoders[id] else { return }
         let m = WireMessage("vframe", ["o": id, "k": packet.keyframe ? "1" : "0", "w": "\(packet.width)", "h": "\(packet.height)"], payload: packet.payload())
         var congested = false
-        for p in peers where p.scopes.contains(o.scope) {
+        // A member's own window goes to the host, which shows it and passes it on.
+        let targets = shares[o.scope]?.hosted == true ? peers.filter { $0.scopes.contains(o.scope) } : [upstream].compactMap { $0 }.filter { !$0.closed }
+        for p in targets {
             if p.pendingSends >= 4 { congested = true; p.videoBroken.insert(id); continue }
             if p.videoBroken.contains(id) {
                 guard packet.keyframe else { enc.requestKeyframe(); continue }
@@ -891,15 +964,19 @@ final class Collaboration: NSObject {
         let dec = decoders[o] ?? {
             let d = H264Decoder()
             d.onFrame = { [weak self] pb in self?.showRemote(pb, for: o) }
-            d.onNeedKeyframe = { [weak self] in
-                guard let self, Date().timeIntervalSince(self.lastKeyRequest[o] ?? .distantPast) > 0.5 else { return }
-                self.lastKeyRequest[o] = Date()
-                self.upstream?.send(WireMessage("keyreq", ["o": o]))
-            }
+            d.onNeedKeyframe = { [weak self] in self?.requestKey(o) }
             decoders[o] = d
             return d
         }()
         dec.decode(packet)
+    }
+
+    /// Asks whoever runs the application for a keyframe, at most twice a second.
+    func requestKey(_ o: ObjectID) {
+        guard let obj = ws.object(o), Date().timeIntervalSince(lastKeyRequest[o] ?? .distantPast) > 0.5 else { return }
+        lastKeyRequest[o] = Date()
+        let owner = runtimeOwner(obj)
+        if owner == me { encoders[o]?.requestKeyframe() } else { sendUser(owner, WireMessage("keyreq", ["o": o])) }
     }
 
     func showRemote(_ pb: CVPixelBuffer, for o: ObjectID) {
@@ -1009,6 +1086,7 @@ final class Collaboration: NSObject {
         switch m.type {
         case "welcome":
             connecting = false
+            hostUserID = m["hostUser"]
             let scopes = (m["scopes"] ?? "").split(separator: "\n").map { $0.split(separator: "\t").map(String.init) }
             for s in scopes where s.count >= 2 {
                 let sid = s[0]
@@ -1048,6 +1126,19 @@ final class Collaboration: NSObject {
             if let u = m["u"] { updatePresence(from: m, user: u) }
         case "vframe":
             receiveVideo(m)
+        case "keyreq":
+            if let o = m["o"] { encoders[o]?.requestKeyframe() }
+        case "control-request":
+            // This member owns the application; the host already checked the requester's edit access.
+            if let o = m["o"], let u = m["from"] { hostControlRequest(o, from: u, name: m["n"] ?? name(of: u) ?? "A collaborator") }
+        case "control-release":
+            if let o = m["o"], let u = m["from"], arbiters[o]?.controller == u { reclaim(o, reason: "\(name(of: u) ?? "The controller") released control") }
+        case "input":
+            guard let o = m["o"], let u = m["from"], let g = UInt64(m["g"] ?? ""), let s = UInt64(m["seq"] ?? ""),
+                  let e = try? JSONDecoder().decode(RemoteInputEvent.self, from: m.payload) else { return }
+            hostInput(o, from: u, generation: g, seq: s, event: e, peer: p)
+        case "control-granted", "control-denied", "control-state", "control-revoked", "input-rejected":
+            clientControl(m)
         case "frame":
             guard let o = m["o"], let img = NSImage(data: m.payload)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
             remoteFrames[o] = (img, Date())
@@ -1055,6 +1146,23 @@ final class Collaboration: NSObject {
                 c.renderer.refreshSurface(o, ws)
                 for l in ws.live where l.props.liveOf == o { c.renderer.refreshSurface(l.id, ws) }
             }
+        case "transfer-result":
+            app.activeCanvas?.hud.flash(m["reason"] ?? "", seconds: 4)
+        case "clipboard":
+            let pb = PasteboardService.board
+            pb.clearContents()
+            if m["kind"] == "text" { pb.setString(String(data: m.payload, encoding: .utf8) ?? "", forType: .string) }
+            else { pb.setData(m.payload, forType: .png) }
+            app.activeCanvas?.hud.flash("Copied from the remote application to your clipboard")
+        case "access-revoked":
+            recoverRevoked(reason: m["reason"] ?? "Access was revoked")
+        default: break
+        }
+    }
+
+    /// Control outcomes addressed to this participant, from whichever Mac runs the application.
+    func clientControl(_ m: WireMessage) {
+        switch m.type {
         case "control-granted":
             guard let o = m["o"], let g = UInt64(m["g"] ?? "") else { return }
             myGrants[o] = g
@@ -1076,16 +1184,6 @@ final class Collaboration: NSObject {
             refreshUI()
         case "input-rejected":
             app.activeCanvas?.hud.flash("Input not delivered: \(m["reason"] ?? "")", seconds: 2.5)
-        case "transfer-result":
-            app.activeCanvas?.hud.flash(m["reason"] ?? "", seconds: 4)
-        case "clipboard":
-            let pb = PasteboardService.board
-            pb.clearContents()
-            if m["kind"] == "text" { pb.setString(String(data: m.payload, encoding: .utf8) ?? "", forType: .string) }
-            else { pb.setData(m.payload, forType: .png) }
-            app.activeCanvas?.hud.flash("Copied from the remote application to your clipboard")
-        case "access-revoked":
-            recoverRevoked(reason: m["reason"] ?? "Access was revoked")
         default: break
         }
     }
@@ -1138,14 +1236,17 @@ final class Collaboration: NSObject {
     }
 
     func requestControl(_ id: ObjectID, from c: CanvasView) {
-        guard let u = upstream, !u.closed else { c.hud.flash("The host is offline. Control cannot be requested."); return }
+        guard let o = ws.object(id) else { return }
+        let owner = runtimeOwner(o)
+        let reachable = peers.contains { $0.userID == owner } || (upstream.map { !$0.closed } ?? false)
+        guard reachable else { c.hud.flash("\(name(of: owner) ?? "The owner") is offline. Control cannot be requested."); return }
         if myGrants[id] != nil { c.hud.flash("You already control this application"); return }
-        u.send(WireMessage("control-request", ["o": id]))
-        c.hud.flash("Asked the host for control…")
+        sendUser(owner, WireMessage("control-request", ["o": id, "n": app.identity.name]))
+        c.hud.flash("Asking \(name(of: owner) ?? "the host") for control…")
     }
 
     func releaseControl(_ id: ObjectID) {
-        upstream?.send(WireMessage("control-release", ["o": id]))
+        if let o = ws.object(id) { sendUser(runtimeOwner(o), WireMessage("control-release", ["o": id])) }
         myGrants[id] = nil
         controllers[id] = nil
         app.runtime.refreshAll(id)
@@ -1156,10 +1257,10 @@ final class Collaboration: NSObject {
     var controlledObject: ObjectID? { myGrants.first(where: { $0.value > 0 })?.key }
 
     func sendInput(_ e: RemoteInputEvent, to id: ObjectID) {
-        guard let g = myGrants[id], let u = upstream else { return }
+        guard let g = myGrants[id], let o = ws.object(id) else { return }
         let n = (seqs[id] ?? 0) + 1
         seqs[id] = n
-        u.send(WireMessage("input", ["o": id, "g": "\(g)", "seq": "\(n)"], payload: (try? JSONEncoder().encode(e)) ?? Data()))
+        sendUser(runtimeOwner(o), WireMessage("input", ["o": id, "g": "\(g)", "seq": "\(n)"], payload: (try? JSONEncoder().encode(e)) ?? Data()))
     }
 
     func transferClipboardText(to id: ObjectID) {
