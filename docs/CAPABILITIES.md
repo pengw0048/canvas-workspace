@@ -4,10 +4,11 @@ Status as of 2026-09-29. Test profile: one MacBook Pro (Apple M4 Max, 64 GB), ma
 built-in display at 2× scale, Swift 6.4 Command Line Tools. Fixture applications: TextEdit
 (system), the host's embedded WebKit browser. All fixtures are non-sensitive local files.
 
-The product is **not complete**. The native hybrid strategy (§7.2 gate) is only partly proven:
-capture, previews, live views, and runtime reconnection work with real windows, but activation
-with window positioning, native drag, remote control of native apps, and exit restoration still
-need the Accessibility permission to be tested.
+The product is **not complete**. The §7.2 native gate now passes for activation, 1:1 placement,
+typing and saving in a real app, app menus, a save sheet above the canvas, return by hot key and
+by canvas click, exit restoration, and reconnection after host restart. Native drag in both
+directions, IME, a second unrelated app, display changes, and remote control of native apps are
+still unverified.
 
 Legend: **Verified** — exercised on this Mac with real applications, real system clipboard,
 real files, or independent processes, with evidence. **Unverified** — implemented, not yet
@@ -20,6 +21,12 @@ exercised end to end. **Simulated** — exercised, but with a stand-in noted in 
 | --- | --- |
 | Native objects on one plane (frame, sticky, text, shape, rotated ellipse, ink) in the real window | [evidence/native-objects.png](evidence/native-objects.png) |
 | Real TextEdit window admitted, frozen region capture, live preview, and live view | [evidence/textedit-live-view.png](evidence/textedit-live-view.png) |
+| Two real windows on the canvas with an overlapping note | [evidence/admitted-windows.png](evidence/admitted-windows.png) |
+| Activation: real window placed 1:1 on its surface; TextEdit owns the menu bar | [evidence/activation-1to1.png](evidence/activation-1to1.png) |
+| TextEdit Save As sheet usable above the canvas | [evidence/save-dialog-over-canvas.png](evidence/save-dialog-over-canvas.png) |
+| After clicking the canvas: input returned, camera restored, preview shows the typed text | [evidence/returned-with-fresh-preview.png](evidence/returned-with-fresh-preview.png) |
+| Annotated capture pasted into the real document; the image as stored inside `deliverable.rtfd` | [evidence/deliverable-pasted-graphic.png](evidence/deliverable-pasted-graphic.png) |
+| Bold, italic, and link formatting in a text object and its pasted copy | [evidence/rich-text.png](evidence/rich-text.png) |
 | Mixed selection copied to the system clipboard, read back by a separate process as PNG | [evidence/clipboard-composition.png](evidence/clipboard-composition.png) |
 | Invariant tests (17): merge, atomic moves, undo conflicts, tombstones, crash-safe storage, asset durability, publication, copy semantics, connectors, frames, splices | `swift test` |
 | Automation transcript commands used below | `scripts/cw.sh`, `Sources/CanvasHost/Automation.swift` |
@@ -40,7 +47,7 @@ exercised end to end. **Simulated** — exercised, but with a stand-in noted in 
 | Asset bytes durable before any object references them | Verified | `fail assets` → capture creates no object. Unit test covers ordering. |
 | Personal camera per user and display, navigation back, focus view | Verified (camera restore) / Unverified (focus, back) | |
 | Search over text, titles, filenames, apps, URLs, named places | Unverified | |
-| Rich text formatting and links in text objects | Not implemented | Text objects are plain text. |
+| Rich text formatting and links in text objects | Verified (render, marks sync, RTF/HTML copy, formatted paste) | Bold, italic, links as Automerge marks. ⌘B/⌘I/⌘K editing not exercised by a person. Formatting changes are not part of canvas undo. |
 | Workspace history preview (§8.5) | Not implemented | Undo history exists; historical arrangement preview does not. |
 | Multiple workspaces | Not implemented | One workspace per profile (`--profile`). |
 
@@ -52,16 +59,19 @@ exercised end to end. **Simulated** — exercised, but with a stand-in noted in 
 | Stored preview, live preview (ScreenCaptureKit stream), offscreen capture budget | Verified (preview, live) | Budget switching not measured. |
 | Window and region capture excludes host overlays and overlapping canvas objects | Verified | Capture uses the window's own buffer (`SCContentFilter(desktopIndependentWindow:)`). |
 | Protected/blank capture refused with explanation | Unverified | Blank-frame detector implemented; no DRM fixture tested. |
-| Activation: 1:1 focus view, real window moved to the object's rect with AX, raised above canvas | **Unverified — needs Accessibility** | Without AX the app activates in place and the surface shows "Positioning needs Accessibility". |
-| Host command ⌃⌥Space and clickable "Return to canvas" panel | Unverified | Carbon hot key registered (no permission needed). |
-| First activation click consumed by host; zoom never grants input | Verified by construction | The canvas window receives the click; inactive windows sit behind it. Person review pending. |
-| Dialogs, sheets, palettes of the active app | Unverified | Real windows of the active app stay above the canvas; expected to work, not tested. |
+| Activation: 1:1 focus view, real window moved to the object's rect with AX, raised above canvas | Verified | Double-click (real events) → TextEdit frontmost, window at the surface's exact rect, typed text and ⌘S changed the real file. First attempt exposed an animation race; fixed. Without AX the surface shows "Positioning needs Accessibility". |
+| Host command ⌃⌥Space, "Return to canvas" panel, click on canvas | Verified (hot key, canvas click) | Input returned, previous camera restored, fresh preview captured. Panel button not clicked yet. |
+| First activation click consumed by host; zoom never grants input | Verified | The first click selected the surface; only the double-click activated it; TextEdit content was untouched. |
+| App menus reflect the active app | Verified | Menu bar showed TextEdit's menus while active. |
+| Dialogs, sheets, palettes of the active app | Verified (Save As sheet, RTFD conversion alert) | Palettes not tested. |
+| IME input in an active app | Unverified | Needs a real input-method session. |
+| A second unrelated application | Unverified | Both tested windows belong to TextEdit. |
 | Surviving runtime reconnect after host restart (pid + window number + bundle; document check) | Verified | Host killed and relaunched; TextEdit window rebound, no duplicate. |
-| Reopen source by document path when the window is gone | Unverified — needs Accessibility | Document path comes from `AXDocument`. |
+| Reopen source by document path when the window is gone | Unverified | Document path comes from `AXDocument`; it now follows app-side renames while connected (found when TextEdit converted `.rtf` to `.rtfd`). |
 | Ambiguous windows ask instead of matching titles | Unverified | |
 | Close application window through its normal close flow | Unverified — needs Accessibility | |
 | Remove from canvas never terminates the runtime | Verified | TextEdit kept running across removal, host quit, and kill -9. |
-| Exit restores original placement; recovery onto a display | Unverified — needs Accessibility | Windows are never moved offscreen, so a crash leaves them usable (verified: kill -9). |
+| Exit restores original placement; recovery onto a display | Verified (exit restore) / Unverified (display recovery) | After activation moved the window, Exit put it back at its original (214, 112). |
 | Multiple displays with independent cameras | Unverified | One display on the test Mac. |
 | Transformed input into arbitrary windows at fractional scale | Unsupported | The hybrid strategy delivers input only to the real window at 1:1. |
 | Dirty-state detection for ordinary apps | Unsupported | Reported as unknown. |
@@ -77,8 +87,8 @@ exercised end to end. **Simulated** — exercised, but with a stand-in noted in 
 | Copy as image / text / link commands | Unverified | |
 | Paste internal selection with remapped IDs, relative geometry, visible offset | Verified | Three objects recreated; unit test checks new IDs. |
 | Paste external text → text object; image → image asset; URL → reference page; files → references | Verified (text) / Unverified (others) | |
-| Paste composition into a real slide/document app | Unverified | Needs a real paste into Keynote/Pages/TextEdit. |
-| Native drag out through the export grip (text, file URL, PNG file promise) | Unverified | Needs a real pointer drag. |
+| Paste composition into a real document app | Verified | Real ⌘C on the canvas, real ⌘V in TextEdit; saved `deliverable.rtfd` contains the annotated capture (evidence). |
+| Native drag out through the export grip (text, file URL, PNG file promise) | Unverified | First attempt was interrupted (the person switched apps). Spring-loading onto app surfaces added so the real window can receive the drop above the full-display canvas. |
 | Drag in (files, images, text, URLs, file promises) | Unverified | |
 | Frozen capture never changes; live view follows its source; freeze creates a new capture | Verified (frozen/live coexist) | The fixture app did not reload the edited file, so live updates were seen as new frames only. |
 
@@ -105,8 +115,8 @@ and identities on the same Mac, connected over loopback TLS-PSK. **Simulated:** 
 | Concurrent moves are atomic transforms | Verified | Same result on both sides; no x/y mixing (also unit-tested). |
 | Offline member edits replay after the host returns | Verified | |
 | Asset fetch permission: private asset denied; published asset delivered | Verified | |
-| Presence, cursors, remote selection outlines, follow mode, movement claims | Verified (presence exchange) / Unverified (visuals, follow, claims) | |
-| Revoke member → future access denied, member keeps a private recovered copy | Unverified | |
+| Presence, cursors, remote selection outlines, follow mode, movement claims | Verified (presence, cursor and dashed selection outline, follow) / Unverified (claims) | Bob's camera followed Alice's; banner offered Stop following. |
+| Revoke member → future access denied, member keeps a private recovered copy | Verified | Bob's shared scope was removed, its 12 objects kept as private copies; rejoining with the code and joining with a wrong code were both refused. |
 | Shared browser runtime: single controller, generation tokens, stale/replayed events rejected, reclaim | Verified | Controller click incremented the page counter; generation 0 and post-reclaim generation 1 events rejected. Grant was issued through automation instead of the host's dialog. |
 | Shared native app: live frames to members, control grant, CGEvent injection with target verification, local takeover reclaim, held-input release | **Unverified — needs Accessibility** | Remote control is reported unavailable without AX. |
 | Explicit transfers: controller text/file into the remote app, copy from the remote app | Unverified | Host restores its own clipboard afterwards unless it changed meanwhile. |
@@ -118,15 +128,27 @@ and identities on the same Mac, connected over loopback TLS-PSK. **Simulated:** 
 
 ## Performance (§14)
 
-Not measured yet. The renderer uses one camera transform on a layer tree and re-rasterizes text
-only after zoom settles. The §14 profile (500 objects, 50 previews, 3 live surfaces, 2 clients)
-has not been run.
+Measured with the release build on the test Mac, windowed 1280×820 at 2×, automation-driven
+(`populate 500`, `bench 600`): 500 objects (150 notes, 100 text, 100 shapes, 100 ink, 50 images
+with distinct 1600×1000 stored previews). Live surfaces and a second participant were not part of
+this run.
+
+| Measure | Result | Target |
+| --- | --- | --- |
+| Main-thread cost per camera frame (update + layer commit), p50 / p95 / max | 2.8 / 9.2 / 34 ms; no frame over 100 ms | p95 ≤ 33 ms display frame time |
+| Reopen the saved 500-object scene to responding | 0.48 s | ≤ 1 s |
+| Memory: empty workspace / 500 objects fit-all / after touring zoom levels | 31 MB / 80 MB / 140–220 MB | — |
+| Stored asset bytes for 50 previews (PNG) | 1.8 MB | — |
+
+This measures main-thread work, not presented display frames. Memory work so far: images decode
+at on-screen size buckets with a 64 MB budget, offscreen objects drop their pixels, shadows use
+explicit paths, and text rasterizes at on-screen resolution. Before these changes the same scene
+used 825 MB.
 
 ## Next steps
 
-1. With Accessibility granted: run the §7.2 gate — activation and positioning across TextEdit and
-   a second unrelated app, IME, menus, save dialog, native drag both ways, exit restoration, and
-   display recovery. Record results here.
-2. Paste a composition into a real document app and save it (E2E-03/04/12).
-3. Shared native app handoff between the two profiles (E2E-09).
-4. Performance profile and rich text.
+1. In a notified input window: native drag both ways (with spring-loading), IME, a second
+   unrelated app, the Return panel button.
+2. Shared native app handoff between the two profiles (E2E-09).
+3. Performance with three live surfaces and two participants.
+4. Workspace history preview (§8.5), multiple workspaces.

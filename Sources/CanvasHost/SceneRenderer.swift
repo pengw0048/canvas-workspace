@@ -5,9 +5,9 @@ import QuartzCore
 /// What the renderer needs from the rest of the host.
 protocol SceneContext: AnyObject {
     var sceneAppearance: NSAppearance { get }
-    func image(for asset: AssetID?) -> CGImage?
+    func image(for asset: AssetID?, pixels: Double) -> CGImage?
     /// Current visual for a runtime-backed object (live frame or stored preview).
-    func surfaceImage(for o: CanvasObject) -> CGImage?
+    func surfaceImage(for o: CanvasObject, pixels: Double) -> CGImage?
     func thumbnail(for o: CanvasObject) -> CGImage?
     func icon(for o: CanvasObject) -> NSImage?
     /// Short consequential status such as "Live", "Last captured 5 min ago", "Source missing".
@@ -58,6 +58,8 @@ final class ObjectLayer: CALayer {
     var kind: ObjectKind = .sticky
     var detail: Detail = .full
     var lastObject: CanvasObject?
+    var evicted = false
+    var bucket = 0
     let body = CALayer()
     let shape = CAShapeLayer()
     let text = TextLayer()
@@ -137,9 +139,21 @@ final class SceneRenderer {
         CATransaction.setDisableActions(true)
         for l in layers.values {
             guard let o = l.lastObject else { continue }
-            let onScreen = vis.intersects(o.geom.bounds)
+            let onScreen = vis.intersects(o.geom.bounds.insetBy(-o.geom.w))
             l.isHidden = !onScreen && !(o.kind == .connector)
-            guard onScreen else { continue }
+            guard onScreen else {
+                // Offscreen surfaces release their decoded pixels; the stored asset stays on disk.
+                if !l.evicted {
+                    l.image.contents = nil
+                    for t in [l.text, l.label, l.badge] { t.contents = nil }
+                    l.evicted = true
+                }
+                continue
+            }
+            if l.evicted || ([.image, .app, .browser].contains(o.kind) && l.bucket != ImageCache.bucket(for: pixelsNeeded(o))) {
+                l.evicted = false
+                configure(l, o, ws)
+            }
             let newDetail = detail(for: o, current: l.detail)
             if newDetail != l.detail { l.detail = newDetail; configure(l, o, ws) }
             rescaleText(l, o)
@@ -157,16 +171,22 @@ final class SceneRenderer {
         }
     }
 
+    /// Longest side in device pixels that an image of this object needs at the current zoom.
+    func pixelsNeeded(_ o: CanvasObject) -> Double {
+        max(o.geom.w, o.geom.h) * camera.zoom * Double(backingScale)
+    }
+
     func textScale(_ o: CanvasObject) -> CGFloat {
         let want = backingScale * CGFloat(camera.zoom)
         let pixels = max(1, o.geom.w * o.geom.h)
         let cap = CGFloat(sqrt(12_000_000 / pixels))
-        return max(1, min(want, cap, 32))
+        // Text is rasterized at its on-screen size, down to a quarter point per pixel when zoomed out.
+        return max(0.25, min(want, cap, 32))
     }
 
     func rescaleText(_ l: ObjectLayer, _ o: CanvasObject) {
         let s = textScale(o)
-        for t in [l.text, l.label, l.badge] where !t.isHidden && abs(t.contentsScale - s) > 0.25 {
+        for t in [l.text, l.label, l.badge] where !t.isHidden && abs(t.contentsScale - s) > max(0.1, s * 0.2) {
             t.contentsScale = s
             t.setNeedsDisplay()
         }
@@ -264,6 +284,17 @@ final class SceneRenderer {
         let o = effective(o0)
         if recordLast { l.lastObject = o0 }
         position(l, o)
+        // Offscreen objects get their pixels only when they come into view (refreshDetail).
+        if o.kind != .connector && o.kind != .frame && !camera.visibleWorld.intersects(o.geom.bounds.insetBy(-o.geom.w)) {
+            l.isHidden = true
+            if !l.evicted {
+                l.image.contents = nil
+                for t in [l.text, l.label, l.badge] { t.contents = nil }
+            }
+            l.evicted = true
+            return
+        }
+        l.isHidden = false
         let ap = appearance
         let size = CGSize(width: o.geom.w, height: o.geom.h)
         let full = CGRect(origin: .zero, size: size)
@@ -284,6 +315,7 @@ final class SceneRenderer {
             l.body.shadowRadius = 6
             l.body.shadowOffset = CGSize(width: 0, height: 2)
             l.body.shadowColor = NSColor.black.cgColor
+            l.body.shadowPath = CGPath(roundedRect: full, cornerWidth: 4, cornerHeight: 4, transform: nil)
             setText(l.text, o, frame: full, inset: CGSize(width: 14, height: 12), color: NSColor(white: 0.1, alpha: 1), size: o.props.fontSize ?? 18, hidden: editing)
         case .text:
             setText(l.text, o, frame: full, inset: .zero, color: NSColor(hex: o.props.color) ?? Theme.text, size: o.props.fontSize ?? 20, hidden: editing)
@@ -334,7 +366,8 @@ final class SceneRenderer {
             l.image.isHidden = false
             l.image.frame = full
             l.image.contentsGravity = .resize
-            l.image.contents = context?.image(for: o.props.assetID)
+            l.bucket = ImageCache.bucket(for: pixelsNeeded(o))
+            l.image.contents = context?.image(for: o.props.assetID, pixels: pixelsNeeded(o))
             l.image.backgroundColor = l.image.contents == nil ? NSColor.quaternaryLabelColor.cg(ap) : nil
             if l.image.contents == nil {
                 setLabel(l.label, "Image bytes unavailable", frame: full.insetBy(dx: 8, dy: 8), size: 12, color: Theme.secondaryText)
@@ -444,6 +477,8 @@ final class SceneRenderer {
         l.body.shadowRadius = 10
         l.body.shadowOffset = CGSize(width: 0, height: 3)
         l.body.shadowColor = NSColor.black.cgColor
+        // An explicit shadow path avoids an offscreen pass and its texture per layer.
+        l.body.shadowPath = CGPath(roundedRect: full, cornerWidth: l.body.cornerRadius, cornerHeight: l.body.cornerRadius, transform: nil)
         l.body.masksToBounds = false
         let title = o.title
         let z = camera.zoom
@@ -475,7 +510,8 @@ final class SceneRenderer {
             l.image.frame = content.insetBy(dx: o.kind == .file ? 10 : 0, dy: o.kind == .file ? 10 : 0)
             l.image.contentsGravity = o.kind == .file ? .resizeAspect : .resizeAspect
             l.image.cornerRadius = o.kind == .file ? 4 : 0
-            let img = o.kind == .file ? context?.thumbnail(for: o) : context?.surfaceImage(for: o)
+            l.bucket = ImageCache.bucket(for: pixelsNeeded(o))
+            let img = o.kind == .file ? context?.thumbnail(for: o) : context?.surfaceImage(for: o, pixels: pixelsNeeded(o))
             l.image.contents = img
             l.image.backgroundColor = o.kind == .file ? nil : NSColor.textBackgroundColor.cg(ap)
             if img == nil {

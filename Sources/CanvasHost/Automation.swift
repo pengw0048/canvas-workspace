@@ -55,6 +55,13 @@ final class Automation {
         close(c)
     }
 
+    static func residentBytes() -> UInt64 {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count) } }
+        return kr == KERN_SUCCESS ? info.resident_size : 0
+    }
+
     func json(_ o: Any) -> String {
         (try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
     }
@@ -309,6 +316,63 @@ final class Automation {
                 guard let w = NativeWindows.window(UInt32(args[1]) ?? 0) else { return json(["error": "no window"]) }
                 app.runtime.bind(args[0], to: w, verifiedBy: "chosen by you")
                 return json(["bindings": app.runtime.bindings.mapValues { "\($0.pid):\($0.windowID)" }])
+            case "populate":
+                // §14 profile: 500 mixed objects, 50 of them with stored 1600×1000 previews.
+                let n = Int(args.first ?? "500") ?? 500
+                var staged: [StagedAsset] = []
+                var objs: [CanvasObject] = []
+                let cs = CGColorSpace(name: CGColorSpace.sRGB)!
+                for i in 0..<n {
+                    let x = Double(i % 25) * 420, y = Double(i / 25) * 340
+                    var o: CanvasObject
+                    switch i % 10 {
+                    case 0:
+                        let ctx = CGContext(data: nil, width: 1600, height: 1000, bitsPerComponent: 8, bytesPerRow: 0, space: cs, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                        ctx.setFillColor(CGColor(red: Double(i % 7) / 7, green: 0.5, blue: 0.8, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 1600, height: 1000))
+                        ctx.setFillColor(.white); for k in 0..<40 { ctx.fill(CGRect(x: 40, y: 40 + k * 22, width: 800 + ((k * 37 + i * 13) % 600), height: 12)) }
+                        let png = pngData(ctx.makeImage()!, maxPixels: 2_000_000)!
+                        let a = try app.session.store.stageAsset(png, mime: "image/png", width: 1600, height: 1000)
+                        staged.append(a)
+                        o = CanvasObject(kind: .image, geom: Geometry(x: x, y: y, w: 380, h: 240)); o.props.assetID = a.id
+                    case 1, 2, 3: o = CanvasObject(kind: .sticky, geom: Geometry(x: x, y: y, w: 200, h: 200), text: "Note \(i): a representative sticky with several words of text"); o.props.color = "#FFE58A"
+                    case 4, 5: o = CanvasObject(kind: .text, geom: Geometry(x: x, y: y, w: 360, h: 60), text: "Text object \(i) with a sentence that wraps across lines"); o.props.fontSize = 20
+                    case 6, 7: o = CanvasObject(kind: .shape, geom: Geometry(x: x, y: y, w: 300, h: 180, rotation: Double(i % 5) * 0.1), text: "Shape \(i)"); o.props.shape = i % 2 == 0 ? .rect : .ellipse; o.props.strokeWidth = 2; o.props.color = "#1E1E1E"
+                    default:
+                        var pts: [Double] = []; for k in 0..<60 { pts += [Double(k) * 5, 60 + 50 * sin(Double(k + i) / 6)] }
+                        o = CanvasObject(kind: .ink, geom: Geometry(x: x, y: y, w: 300, h: 120)); o.props.inkPoints = pts; o.props.logicalSize = [300, 120]; o.props.strokeWidth = 3; o.props.color = "#0B84F3"
+                    }
+                    o.z = FractionalIndex.between(objs.last?.z, nil)
+                    objs.append(o)
+                }
+                let t0 = Date()
+                try ws.perform("Populate", assets: staged, recordUndo: false) { tx in for o in objs { tx.create(o) } }
+                return json(["created": objs.count, "seconds": Date().timeIntervalSince(t0)])
+            case "rss":
+                return json(["rss_mb": Double(Self.residentBytes()) / 1_048_576])
+            case "bench":
+                // Main-thread cost per camera frame (update + layer commit), not display frame time.
+                let frames = Int(args.first ?? "300") ?? 300
+                var times: [Double] = []
+                let start = c.camera
+                for f in 0..<frames {
+                    let t = Double(f) / Double(frames)
+                    let t0 = CACurrentMediaTime()
+                    c.camera.center = WPoint(x: 5000 * t, y: 2000 * sin(t * .pi * 2))
+                    c.camera.zoom = 0.15 + 1.2 * (0.5 + 0.5 * sin(t * .pi * 4))
+                    c.applyCamera()
+                    if f % 10 == 0 { c.renderer.refreshDetail(ws) }
+                    CATransaction.flush()
+                    times.append((CACurrentMediaTime() - t0) * 1000)
+                    RunLoop.main.run(until: Date().addingTimeInterval(0.001))
+                }
+                c.camera = start
+                c.applyCamera()
+                let sorted = times.sorted()
+                func pct(_ p: Double) -> Double { sorted[min(sorted.count - 1, Int(Double(sorted.count) * p))] }
+                let t1 = CACurrentMediaTime(); c.renderer.refreshDetail(ws); CATransaction.flush()
+                return json(["frames": frames, "p50_ms": pct(0.5), "p95_ms": pct(0.95), "max_ms": sorted.last ?? 0, "over_100ms": times.filter { $0 > 100 }.count,
+                             "detail_refresh_ms": (CACurrentMediaTime() - t1) * 1000, "objects": ws.live.count,
+                             "rss_mb": Double(Self.residentBytes()) / 1_048_576])
             case "identity":
                 return json(["id": app.identity.id, "name": app.identity.name])
             case "flush":

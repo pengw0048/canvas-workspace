@@ -79,11 +79,11 @@ final class RuntimeCoordinator: NSObject {
 
     // MARK: Presentation queries
 
-    func surfaceImage(for o: CanvasObject) -> CGImage? {
-        if o.kind == .browser { return app.collab?.remoteFrame(o.id) ?? app.browsers.frame(for: o) ?? app.images.image(o.props.previewAssetID) }
+    func surfaceImage(for o: CanvasObject, pixels: Double = 2048) -> CGImage? {
+        if o.kind == .browser { return app.collab?.remoteFrame(o.id) ?? app.browsers.frame(for: o) ?? app.images.image(o.props.previewAssetID, pixels: pixels) }
         if let f = frames[o.id] { return f }
         if let r = app.collab?.remoteFrame(o.id) { return r }
-        return app.images.image(o.props.previewAssetID)
+        return app.images.image(o.props.previewAssetID, pixels: pixels)
     }
 
     func icon(for o: CanvasObject) -> NSImage? {

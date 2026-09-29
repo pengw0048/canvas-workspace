@@ -184,7 +184,7 @@ final class CaptureService {
         let capID = newID()
         do {
             let a = try app.session.store.stageAsset(png, mime: "image/png", width: img.width, height: img.height)
-            app.images.put(a.id, img)
+            app.images.put(a.id, Self.displayCopy(img))
             let rec = CaptureRecord(id: capID, assetID: a.id, sourceObjectID: o.id, sourceID: o.props.sourceID, appName: o.props.appName,
                                     windowTitle: o.props.windowTitle, documentPath: src?.documentPath, url: o.props.url,
                                     time: Date().timeIntervalSince1970, region: region.map { [$0.minX, $0.minY, $0.width, $0.height] },
@@ -209,7 +209,7 @@ final class CaptureService {
 
     /// Cropping an existing image creates a new image object; the original stays unchanged.
     func cropImage(_ id: ObjectID, normalized: CGRect, in c: CanvasView) {
-        guard let o = ws.object(id), let img = app.images.image(o.props.assetID), let cropped = crop(img, normalized),
+        guard let o = ws.object(id), let img = app.images.fullImage(o.props.assetID), let cropped = crop(img, normalized),
               let png = pngData(cropped, maxPixels: 40_000_000) else { return }
         do {
             let a = try app.session.store.stageAsset(png, mime: "image/png", width: cropped.width, height: cropped.height)
@@ -318,6 +318,21 @@ final class CaptureService {
     }
 }
 
+extension CaptureService {
+    /// A bounded copy for the display cache.
+    static func displayCopy(_ img: CGImage, maxSide: Int = 2048) -> CGImage {
+        let m = max(img.width, img.height)
+        guard m > maxSide else { return img }
+        let s = Double(maxSide) / Double(m)
+        let w = Int(Double(img.width) * s), h = Int(Double(img.height) * s)
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return img }
+        ctx.interpolationQuality = .high
+        ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage() ?? img
+    }
+}
+
 func pngData(_ img: CGImage, maxPixels: Int) -> Data? {
     var src = img
     let px = img.width * img.height
@@ -334,32 +349,57 @@ func pngData(_ img: CGImage, maxPixels: Int) -> Data? {
     return NSBitmapImageRep(cgImage: src).representation(using: .png, properties: [:])
 }
 
-/// Bounded decoded-image cache over content-addressed assets.
+/// Bounded decoded-image cache over content-addressed assets, decoded at the size on screen.
 final class ImageCache {
     let store: Store
-    var cache: [AssetID: CGImage] = [:]
-    var order: [AssetID] = []
-    let limit = 96
+    var cache: [String: CGImage] = [:]
+    var order: [String] = []
+    /// Total decoded bytes allowed in the cache.
+    let budget = 64 * 1_048_576
+    var bytes = 0
+    static let buckets = [256, 512, 1024, 2048, 4096]
 
     init(store: Store) { self.store = store }
 
-    func image(_ id: AssetID?) -> CGImage? {
+    static func bucket(for pixels: Double) -> Int { buckets.first { Double($0) >= pixels } ?? buckets.last! }
+
+    /// A decoded copy whose longest side is at least `pixels` (bucketed), or the original if smaller.
+    func image(_ id: AssetID?, pixels: Double = 2048) -> CGImage? {
         guard let id else { return nil }
-        if let i = cache[id] { touch(id); return i }
-        guard let src = CGImageSourceCreateWithURL(store.assetURL(id) as CFURL, nil),
-              let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
-        put(id, img)
+        let b = Self.bucket(for: pixels)
+        let key = "\(id)@\(b)"
+        if let i = cache[key] { touch(key); return i }
+        let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: b,
+                                     kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: true]
+        guard let src = CGImageSourceCreateWithURL(store.assetURL(id) as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let img = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        insert(key, img)
         return img
     }
 
-    func put(_ id: AssetID, _ img: CGImage) {
-        cache[id] = img
-        touch(id)
-        while order.count > limit { cache[order.removeFirst()] = nil }
+    func fullImage(_ id: AssetID?) -> CGImage? {
+        guard let id, let src = CGImageSourceCreateWithURL(store.assetURL(id) as CFURL, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(src, 0, nil)
     }
 
-    func touch(_ id: AssetID) {
-        order.removeAll { $0 == id }
-        order.append(id)
+    /// Seeds the cache with a freshly captured image.
+    func put(_ id: AssetID, _ img: CGImage) {
+        insert("\(id)@\(Self.bucket(for: Double(max(img.width, img.height))))", img)
+    }
+
+    func insert(_ key: String, _ img: CGImage) {
+        if let old = cache[key] { bytes -= old.bytesPerRow * old.height }
+        cache[key] = img
+        bytes += img.bytesPerRow * img.height
+        touch(key)
+        while bytes > budget, order.count > 1 {
+            let k = order.removeFirst()
+            if let o = cache.removeValue(forKey: k) { bytes -= o.bytesPerRow * o.height }
+        }
+    }
+
+    func touch(_ key: String) {
+        if let i = order.firstIndex(of: key) { order.remove(at: i) }
+        order.append(key)
     }
 }

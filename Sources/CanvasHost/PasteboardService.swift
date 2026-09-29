@@ -132,7 +132,7 @@ final class PasteboardService: NSObject {
             item.setString(ls.map(\.absoluteString).joined(separator: "\n"), forType: .string)
             return item
         case .image:
-            guard let img = singleImage ? app.images.image(objs[0].props.assetID) : renderComposition(ids) else {
+            guard let img = singleImage ? app.images.fullImage(objs[0].props.assetID) : renderComposition(ids) else {
                 throw CanvasError.permission("The selection could not be rendered")
             }
             guard let png = pngData(img, maxPixels: 60_000_000) else { throw CanvasError.permission("Encoding failed") }
@@ -154,7 +154,7 @@ final class PasteboardService: NSObject {
                 item.setString(t, forType: .string)
             } else if singleImage, let a = objs[0].props.assetID, let d = app.session.store.assetData(a) {
                 item.setData(d, forType: .png)
-                if let img = app.images.image(a), let tiff = NSBitmapImageRep(cgImage: img).tiffRepresentation { item.setData(tiff, forType: .tiff) }
+                if let img = app.images.fullImage(a), let tiff = NSBitmapImageRep(cgImage: img).tiffRepresentation { item.setData(tiff, forType: .tiff) }
             } else if onlyFiles {
                 let urls = fileURLs(objs)
                 guard let first = urls.first else { throw CanvasError.permission("The file is missing. Relink it before copying.") }
@@ -288,7 +288,7 @@ final class PasteboardService: NSObject {
     // MARK: Export to file
 
     func exportImage(ids: [ObjectID]) {
-        guard let img = (ids.count == 1 ? ws.object(ids[0]).flatMap { $0.kind == .image ? app.images.image($0.props.assetID) : nil } : nil) ?? renderComposition(ids),
+        guard let img = (ids.count == 1 ? ws.object(ids[0]).flatMap { $0.kind == .image ? app.images.fullImage($0.props.assetID) : nil } : nil) ?? renderComposition(ids),
               let png = pngData(img, maxPixels: 80_000_000) else { return }
         let p = NSSavePanel()
         p.allowedContentTypes = [.png]
@@ -353,7 +353,7 @@ extension CanvasView: NSDraggingSource {
             it.setDraggingFrame(frame, contents: dragImage)
             items.append(it)
         } else {
-            let img = objs.count == 1 && objs[0].kind == .image ? app.images.image(objs[0].props.assetID) : app.pasteboard.renderComposition(ids)
+            let img = objs.count == 1 && objs[0].kind == .image ? app.images.fullImage(objs[0].props.assetID) : app.pasteboard.renderComposition(ids)
             guard let img, let png = pngData(img, maxPixels: 60_000_000) else { return }
             let name = (objs.count == 1 ? objs[0].title : "Canvas composition").replacingOccurrences(of: "/", with: "-") + ".png"
             let del = PromiseDelegate(data: png, name: name)
