@@ -254,9 +254,12 @@ final class CanvasView: NSView, SceneContext {
     func setCamera(_ c: Camera, animated: Bool = true, record: Bool = true, duration: Double = 0.28, completion: (() -> Void)? = nil) {
         if record { pushBack() }
         cameraAnimation?.invalidate()
+        renderer.flightTarget = nil
         let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         guard animated, !reduce, duration > 0 else { camera = c; applyCamera(); completion?(); return }
         let from = camera
+        renderer.flightTarget = c.visibleWorld
+        renderer.refreshDetail(ws)
         let start = CACurrentMediaTime()
         cameraAnimation = Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { [weak self] t in
             guard let self else { t.invalidate(); return }
@@ -273,6 +276,7 @@ final class CanvasView: NSView, SceneContext {
                 self.cameraAnimation = nil
                 self.camera = c
                 self.applyCamera()
+                self.renderer.flightTarget = nil
                 self.renderer.refreshDetail(self.ws)
                 completion?()
             }

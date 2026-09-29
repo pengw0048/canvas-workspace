@@ -34,6 +34,14 @@ final class TextLayer: CALayer {
     var attributed = NSAttributedString()
     var inset = CGSize(width: 0, height: 0)
     var verticallyCentered = false
+    /// Chips kept at a constant screen size: a world anchor plus an offset in screen points.
+    var pin: (anchor: CGPoint, offset: CGPoint)?
+
+    func counterScale(_ s: CGFloat) {
+        guard let p = pin, !isHidden else { return }
+        setAffineTransform(CGAffineTransform(scaleX: s, y: s))
+        position = CGPoint(x: p.anchor.x + p.offset.x * s, y: p.anchor.y + p.offset.y * s)
+    }
 
     override init() {
         super.init()
@@ -101,6 +109,10 @@ final class SceneRenderer {
     let worldLayer = CALayer()
     private(set) var layers: [ObjectID: ObjectLayer] = [:]
     private(set) var rebase = WPoint(x: 0, y: 0)
+    private var pinnedZoom: CGFloat = 0
+    /// Where a camera flight lands; surfaces there stay loaded for the whole flight.
+    var flightTarget: WRect?
+    var loadedWorld: WRect { flightTarget.map { camera.visibleWorld.union($0) } ?? camera.visibleWorld }
     weak var context: SceneContext?
     var camera: Camera
     var backingScale: CGFloat = 2
@@ -134,12 +146,17 @@ final class SceneRenderer {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         worldLayer.sublayerTransform = t
+        // Chips and badges stay the same screen size during camera flights too.
+        if c.zoom != pinnedZoom {
+            pinnedZoom = c.zoom
+            for l in layers.values where !l.isHidden { l.label.counterScale(1 / c.zoom); l.badge.counterScale(1 / c.zoom) }
+        }
         CATransaction.commit()
     }
 
     /// Re-rasterizes text and swaps level of detail for visible objects after zoom settles.
     func refreshDetail(_ ws: Workspace) {
-        let vis = camera.visibleWorld
+        let vis = loadedWorld
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for l in layers.values {
@@ -303,7 +320,7 @@ final class SceneRenderer {
         if recordLast { l.lastObject = o0 }
         position(l, o)
         // Offscreen objects get their pixels only when they come into view (refreshDetail).
-        if o.kind != .connector && o.kind != .frame && !camera.visibleWorld.intersects(o.geom.bounds.insetBy(-o.geom.w)) {
+        if o.kind != .connector && o.kind != .frame && !loadedWorld.intersects(o.geom.bounds.insetBy(-o.geom.w)) {
             l.isHidden = true
             if !l.evicted {
                 l.image.contents = nil
@@ -422,8 +439,8 @@ final class SceneRenderer {
         ])
         l.label.frame = CGRect(x: 0, y: -20 * s, width: max(40, o.geom.w), height: 18 * s)
         l.label.bounds = CGRect(x: 0, y: 0, width: max(40, o.geom.w) / s, height: 18)
-        l.label.setAffineTransform(CGAffineTransform(scaleX: s, y: s))
-        l.label.position = CGPoint(x: 0, y: -20 * s)
+        l.label.pin = (.zero, CGPoint(x: 0, y: -20))
+        l.label.counterScale(s)
         l.label.contentsScale = backingScale
         l.label.setNeedsDisplay()
     }
@@ -542,13 +559,13 @@ final class SceneRenderer {
             l.label.borderWidth = 0.5
             l.label.borderColor = Theme.cardBorder.cg(ap)
             l.label.bounds = CGRect(x: 0, y: 0, width: w, height: 23)
-            l.label.setAffineTransform(CGAffineTransform(scaleX: s, y: s))
-            l.label.position = CGPoint(x: fit.minX, y: fit.minY - 29 * s)
+            l.label.pin = (CGPoint(x: fit.minX, y: fit.minY), CGPoint(x: 0, y: -29))
+            l.label.counterScale(s)
             l.label.contentsScale = backingScale
             l.label.setNeedsDisplay()
         }
         // With a title chip, the badge sits right after it instead of over it.
-        let chipEnd: CGFloat? = l.label.isHidden ? nil : fit.minX + (l.label.bounds.width + 6) * s
+        let chipEnd: (x: CGFloat, offset: CGFloat)? = l.label.isHidden ? nil : (fit.minX, l.label.bounds.width + 6)
         if let st = context?.status(for: o) { setBadge(l, st, width: fit.maxX, top: fit.minY, selected: selected, leading: chipEnd) }
     }
 
@@ -624,7 +641,7 @@ final class SceneRenderer {
 
     /// Status badges stay small. Problems always show; "Live" is a dot unless selected; ordinary
     /// status (such as preview age) appears only on selection. Presentation mode keeps problems only.
-    func setBadge(_ l: ObjectLayer, _ st: SurfaceStatus, width: CGFloat, top: CGFloat, selected: Bool, leading: CGFloat? = nil) {
+    func setBadge(_ l: ObjectLayer, _ st: SurfaceStatus, width: CGFloat, top: CGFloat, selected: Bool, leading: (x: CGFloat, offset: CGFloat)? = nil) {
         let presenting = context?.presenting ?? false
         let problem = st.tone == .warning || st.tone == .error
         guard problem || (!presenting && (selected || st.tone == .live)) else { l.badge.isHidden = true; return }
@@ -649,12 +666,12 @@ final class SceneRenderer {
         l.badge.borderWidth = dotOnly ? 1.5 : 0
         l.badge.borderColor = NSColor.white.cgColor
         l.badge.bounds = CGRect(x: 0, y: 0, width: w, height: h)
-        l.badge.setAffineTransform(CGAffineTransform(scaleX: s, y: s))
         if let leading {
-            l.badge.position = CGPoint(x: leading, y: top - (23 + h) / 2 * s - 6 * s)
+            l.badge.pin = (CGPoint(x: leading.x, y: top), CGPoint(x: leading.offset, y: -(23 + h) / 2 - 6))
         } else {
-            l.badge.position = CGPoint(x: width - (w + 6) * s, y: top - (h + 6) * s)
+            l.badge.pin = (CGPoint(x: width, y: top), CGPoint(x: -(w + 6), y: -(h + 6)))
         }
+        l.badge.counterScale(s)
         l.badge.contentsScale = backingScale
         l.badge.setNeedsDisplay()
     }

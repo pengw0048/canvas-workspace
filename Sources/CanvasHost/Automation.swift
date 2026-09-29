@@ -168,7 +168,7 @@ final class Automation {
                 c.applyCamera()
                 c.renderer.refreshDetail(ws)
                 return json(["ok": true])
-            case "fit": c.cameraAnimation?.invalidate(); var cam = c.camera; cam.fit(WRect.union(ws.live.map(\.geom.bounds)) ?? cam.visibleWorld); c.camera = cam; c.applyCamera(); c.renderer.refreshDetail(ws); return json(["ok": true])
+            case "fit": c.cameraAnimation?.invalidate(); c.renderer.flightTarget = nil; var cam = c.camera; cam.fit(WRect.union(ws.live.map(\.geom.bounds)) ?? cam.visibleWorld); c.camera = cam; c.applyCamera(); c.renderer.refreshDetail(ws); return json(["ok": true])
             case "hit":
                 let hits = ws.hitTest(WPoint(x: Double(args[0]) ?? 0, y: Double(args[1]) ?? 0), zoom: c.camera.zoom)
                 return json(["hits": hits.map(\.id)])

@@ -325,6 +325,8 @@ final class Collaboration: NSObject {
         tcp.noDelay = true
         let p = NWParameters(tls: tls, tcp: tcp)
         p.includePeerToPeer = true
+        // A relaunched host rebinds its share port while old connections are still in TIME_WAIT.
+        p.allowLocalEndpointReuse = true
         return p
     }
 
