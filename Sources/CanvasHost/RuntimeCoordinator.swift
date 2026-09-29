@@ -278,8 +278,8 @@ final class RuntimeCoordinator: NSObject {
         }
         src.lastTitle = ax.flatMap(NativeWindows.title) ?? w.title
         app.session.putSource(src)
-        var o = CanvasObject(kind: .app, geom: Geometry(x: center.x - w.frame.width / 2, y: center.y - w.frame.height / 2 - 15,
-                                                         w: w.frame.width, h: w.frame.height + 30))
+        var o = CanvasObject(kind: .app, geom: Geometry(x: center.x - w.frame.width / 2, y: center.y - w.frame.height / 2,
+                                                         w: w.frame.width, h: w.frame.height))
         o.props.sourceID = src.id
         o.props.appBundleID = src.bundleID
         o.props.appName = src.appName
@@ -337,8 +337,7 @@ final class RuntimeCoordinator: NSObject {
 
     /// Content rect of a surface in world coordinates: aspect-fit below the title bar.
     func contentRect(of o: CanvasObject) -> WRect {
-        let bar = [.app, .browser].contains(o.kind) ? min(30, o.geom.h * 0.2) : 0
-        let area = WRect(x: o.geom.x, y: o.geom.y + bar, w: o.geom.w, h: o.geom.h - bar)
+        let area = o.geom.rect
         guard let ls = o.props.logicalSize, ls.count == 2, ls[0] > 0, ls[1] > 0 else { return area }
         let s = min(area.w / ls[0], area.h / ls[1])
         let w = ls[0] * s, h = ls[1] * s
@@ -362,26 +361,30 @@ final class RuntimeCoordinator: NSObject {
         cam.zoom = logicalW / content.w
         cam.center = content.center
         let needMove = NativeWindows.axTrusted && b.ax != nil
-        c.enterFocusView(id, camera: cam)
         activeObject = id
         activeCanvas = c
+        // The real window moves behind the canvas first, to where the preview will land.
         if needMove, let ax = b.ax, let window = c.window {
-            let viewRect = c.camera.toView(content)
-            let inWindow = c.convert(viewRect, to: nil)
-            let cocoa = window.convertToScreen(inWindow)
+            let viewRect = cam.toView(content)
+            let cocoa = window.convertToScreen(c.convert(viewRect, to: nil))
             let global = NativeWindows.globalRect(fromCocoa: cocoa)
-            NativeWindows.setOrigin(ax, CGPoint(x: global.minX.rounded(), y: global.minY.rounded()))
             if NativeWindows.isMinimized(ax) { AXUIElementSetAttributeValue(ax, kAXMinimizedAttribute as CFString, kCFBooleanFalse) }
-            NativeWindows.raise(ax)
+            NativeWindows.setOrigin(ax, CGPoint(x: global.minX.rounded(), y: global.minY.rounded()))
             degradedReason[id] = nil
         } else {
             degradedReason[id] = NativeWindows.axTrusted ? "Window could not be positioned" : "Positioning needs Accessibility"
         }
-        NSRunningApplication(processIdentifier: b.pid)?.activate(options: [])
-        showReturnPanel(for: id)
-        app.gestures.start()
-        app.collab?.localActivity(on: id)
         refreshAll(id)
+        // Fly into the surface; when the preview matches the window 1:1, the real window takes over.
+        c.enterFocusView(id, camera: cam, duration: 0.45) { [weak self] in
+            guard let self, self.activeObject == id else { return }
+            if needMove, let ax = b.ax { NativeWindows.raise(ax) }
+            NSRunningApplication(processIdentifier: b.pid)?.activate(options: [])
+            self.showReturnPanel(for: id)
+            self.app.gestures.start()
+            self.app.collab?.localActivity(on: id)
+            self.refreshAll(id)
+        }
     }
 
     /// Marks an in-host surface (a browser runtime) as the input owner.

@@ -38,6 +38,26 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var saveRetry: Timer?
     var history: HistoryPanel?
     lazy var gestures = GestureHandoff(app: self)
+    /// Presentation mode: quieter chrome for demos and screen recordings.
+    var presenting = false { didSet { presentationChanged() } }
+
+    @objc func togglePresentation(_ s: Any?) { presenting.toggle() }
+
+    /// Hides status chrome and the Debug menu, auto-hides the tool strip, and streams every
+    /// connected window surface live.
+    func presentationChanged() {
+        NSApp.mainMenu?.items.first { $0.title == "Debug" }?.isHidden = presenting
+        for c in canvases {
+            c.hud.update()
+            c.toolbar?.setAutoHide(presenting)
+            c.renderer.sync(workspace)
+            c.renderer.refreshDetail(workspace)
+            for o in workspace.live where [.app, .browser, .image].contains(o.kind) { c.renderer.refreshSurface(o.id, workspace) }
+        }
+        if presenting {
+            for (id, _) in runtime.bindings where !runtime.isLive(id) { runtime.toggleLive(id) }
+        }
+    }
 
     init(profile: String, windowed: Bool) {
         self.profile = profile
@@ -626,6 +646,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             m.addItem(.separator())
             item(m, "Inspector", #selector(toggleInspector(_:)), "i", [.command, .option], target: self)
             item(m, "Workspace History…", #selector(showHistory(_:)), "y", [.command, .shift], target: self)
+            item(m, "Presentation Mode", #selector(togglePresentation(_:)), "p", [.command, .option], target: self)
             item(m, "Collaboration…", #selector(Collaboration.showPanelAction(_:)), "k", [.command, .shift], target: collab)
         }
         top("Window") { m in

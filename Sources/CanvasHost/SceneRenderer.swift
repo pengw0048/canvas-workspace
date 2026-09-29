@@ -16,6 +16,9 @@ protocol SceneContext: AnyObject {
     func status(for o: CanvasObject) -> SurfaceStatus?
     var editingID: ObjectID? { get }
     var activeID: ObjectID? { get }
+    func isSelected(_ id: ObjectID) -> Bool
+    /// Presentation mode keeps only consequential status visible.
+    var presenting: Bool { get }
 }
 
 struct SurfaceStatus: Equatable {
@@ -383,7 +386,7 @@ final class SceneRenderer {
             if l.image.contents == nil {
                 setLabel(l.label, "Image bytes unavailable", frame: full.insetBy(dx: 8, dy: 8), size: 12, color: Theme.secondaryText)
             }
-            if let st = context?.status(for: o) { setBadge(l, st, width: size.width) }
+            if let st = context?.status(for: o) { setBadge(l, st, width: size.width, top: 0, selected: context?.isSelected(o.id) ?? false) }
         case .frame:
             l.body.isHidden = false
             l.body.frame = full
@@ -394,8 +397,10 @@ final class SceneRenderer {
             layoutFrameLabel(l, o)
         case .connector:
             configureConnector(l, o, ws)
-        case .file, .app, .browser:
+        case .file:
             configureSurface(l, o, size: size)
+        case .app, .browser:
+            configureWindowSurface(l, o, size: size)
         case .group:
             break
         }
@@ -472,7 +477,76 @@ final class SceneRenderer {
         }
     }
 
-    /// Application, browser, and file surfaces.
+    /// Aspect-fit rect of a window-like surface inside its object box (local coordinates).
+    static func fitRect(_ o: CanvasObject, in full: CGRect) -> CGRect {
+        guard let ls = o.props.logicalSize, ls.count == 2, ls[0] > 0, ls[1] > 0 else { return full }
+        let k = min(full.width / ls[0], full.height / ls[1])
+        let w = ls[0] * k, h = ls[1] * k
+        return CGRect(x: full.minX + (full.width - w) / 2, y: full.minY + (full.height - h) / 2, width: w, height: h)
+    }
+
+    /// Application and browser surfaces: the window image itself, rounded and shadowed, with a
+    /// floating title chip when selected, active, or seen from a distance.
+    func configureWindowSurface(_ l: ObjectLayer, _ o: CanvasObject, size: CGSize) {
+        let ap = appearance
+        let full = CGRect(origin: .zero, size: size)
+        let fit = Self.fitRect(o, in: full)
+        let active = context?.activeID == o.id
+        let selected = context?.isSelected(o.id) ?? false
+        let s = 1 / camera.zoom
+        if l.detail == .icon {
+            configureSurface(l, o, size: size)
+            return
+        }
+        let radius = min(10, fit.width * 0.03)
+        l.body.isHidden = false
+        l.body.frame = fit
+        l.body.backgroundColor = NSColor.textBackgroundColor.cg(ap)
+        l.body.cornerRadius = radius
+        l.body.borderWidth = active ? 3 * s : 0
+        l.body.borderColor = Theme.focus.cg(ap)
+        l.body.shadowOpacity = 0.22
+        l.body.shadowRadius = 16
+        l.body.shadowOffset = CGSize(width: 0, height: 6)
+        l.body.shadowColor = NSColor.black.cgColor
+        l.body.shadowPath = CGPath(roundedRect: CGRect(origin: .zero, size: fit.size), cornerWidth: radius, cornerHeight: radius, transform: nil)
+        l.body.masksToBounds = false
+        l.image.isHidden = false
+        l.image.frame = fit
+        l.image.cornerRadius = radius
+        l.image.masksToBounds = true
+        l.image.contentsGravity = .resize
+        l.image.backgroundColor = nil
+        l.bucket = ImageCache.bucket(for: pixelsNeeded(o))
+        l.image.contents = context?.surfaceContents(for: o, pixels: pixelsNeeded(o))
+        if selected || active || l.detail == .thumbnail {
+            let chip = NSMutableAttributedString()
+            if let icon = context?.icon(for: o) {
+                let att = NSTextAttachment()
+                att.image = icon
+                att.bounds = CGRect(x: 0, y: -3, width: 15, height: 15)
+                chip.append(NSAttributedString(attachment: att))
+                chip.append(NSAttributedString(string: "  "))
+            }
+            chip.append(NSAttributedString(string: o.title, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: Theme.text]))
+            let w = min(chip.size().width + 18, max(80, fit.width / s))
+            l.label.isHidden = false
+            l.label.attributed = chip
+            l.label.inset = CGSize(width: 9, height: 4)
+            l.label.backgroundColor = Theme.cardBackground.cg(ap)
+            l.label.cornerRadius = 8
+            l.label.borderWidth = 0.5
+            l.label.borderColor = Theme.cardBorder.cg(ap)
+            l.label.bounds = CGRect(x: 0, y: 0, width: w, height: 23)
+            l.label.setAffineTransform(CGAffineTransform(scaleX: s, y: s))
+            l.label.position = CGPoint(x: fit.minX, y: fit.minY - 29 * s)
+            l.label.contentsScale = backingScale
+            l.label.setNeedsDisplay()
+        }
+        if let st = context?.status(for: o) { setBadge(l, st, width: fit.maxX, top: fit.minY, selected: selected) }
+    }
+
+    /// File surfaces (and icon-level detail for windows).
     func configureSurface(_ l: ObjectLayer, _ o: CanvasObject, size: CGSize) {
         let ap = appearance
         let full = CGRect(origin: .zero, size: size)
@@ -539,31 +613,38 @@ final class SceneRenderer {
                 l.image.frame = CGRect(x: 10, y: 10, width: size.width - 20, height: size.height - 44)
             }
         }
-        if let status { setBadge(l, status, width: size.width) }
+        if let status { setBadge(l, status, width: size.width, top: 0, selected: context?.isSelected(o.id) ?? false) }
     }
 
-    func setBadge(_ l: ObjectLayer, _ st: SurfaceStatus, width: CGFloat) {
+    /// Status badges stay small. Problems always show; "Live" is a dot unless selected; ordinary
+    /// status (such as preview age) appears only on selection. Presentation mode keeps problems only.
+    func setBadge(_ l: ObjectLayer, _ st: SurfaceStatus, width: CGFloat, top: CGFloat, selected: Bool) {
+        let presenting = context?.presenting ?? false
+        let problem = st.tone == .warning || st.tone == .error
+        guard problem || (!presenting && (selected || st.tone == .live)) else { l.badge.isHidden = true; return }
         let s = 1 / camera.zoom
         l.badge.isHidden = false
         let color: NSColor
         switch st.tone {
-        case .normal: color = NSColor(white: 0.25, alpha: 0.85)
-        case .live: color = NSColor.systemGreen.withAlphaComponent(0.92)
-        case .warning: color = NSColor.systemOrange.withAlphaComponent(0.92)
-        case .error: color = NSColor.systemRed.withAlphaComponent(0.92)
+        case .normal: color = NSColor(white: 0.2, alpha: 0.8)
+        case .live: color = NSColor.systemGreen.withAlphaComponent(0.95)
+        case .warning: color = NSColor.systemOrange.withAlphaComponent(0.95)
+        case .error: color = NSColor.systemRed.withAlphaComponent(0.95)
         }
-        let prefix = st.tone == .live ? "● " : (st.tone == .error ? "⚠︎ " : "")
-        let str = NSAttributedString(string: prefix + st.text, attributes: [
-            .font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.white,
-        ])
-        let w = min(str.size().width + 14, max(60, width / s - 12))
+        let dotOnly = st.tone == .live && !selected
+        let text = dotOnly ? "" : ((st.tone == .error ? "⚠︎ " : "") + st.text)
+        let str = NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.white])
+        let w = dotOnly ? 10 : min(str.size().width + 12, max(50, width / s - 12))
+        let h: CGFloat = dotOnly ? 10 : 17
         l.badge.attributed = str
-        l.badge.inset = CGSize(width: 7, height: 3)
+        l.badge.inset = CGSize(width: 6, height: 2.5)
         l.badge.backgroundColor = color.cgColor
-        l.badge.cornerRadius = 9
-        l.badge.bounds = CGRect(x: 0, y: 0, width: w, height: 19)
+        l.badge.cornerRadius = h / 2
+        l.badge.borderWidth = dotOnly ? 1.5 : 0
+        l.badge.borderColor = NSColor.white.cgColor
+        l.badge.bounds = CGRect(x: 0, y: 0, width: w, height: h)
         l.badge.setAffineTransform(CGAffineTransform(scaleX: s, y: s))
-        l.badge.position = CGPoint(x: width - (w + 8) * s, y: -26 * s)
+        l.badge.position = CGPoint(x: width - (w + 6) * s, y: top - (h + 6) * s)
         l.badge.contentsScale = backingScale
         l.badge.setNeedsDisplay()
     }

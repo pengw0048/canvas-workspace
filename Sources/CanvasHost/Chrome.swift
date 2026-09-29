@@ -80,6 +80,29 @@ final class ToolbarView: NSView {
         for (t, b) in buttons { b.state = t == canvas.tool ? .on : .off }
     }
 
+    var autoHide = false
+    var shown = true
+
+    /// In presentation mode the strip appears only while the pointer is near the bottom edge.
+    func setAutoHide(_ on: Bool) {
+        autoHide = on
+        reveal(!on)
+    }
+
+    func reveal(_ show: Bool) {
+        guard show != shown else { return }
+        shown = show
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.2
+            animator().alphaValue = show ? 1 : 0
+        }
+    }
+
+    func pointerMoved(_ vp: CGPoint, in bounds: NSRect) {
+        guard autoHide else { return }
+        reveal(bounds.maxY - vp.y < 110)
+    }
+
     func layoutIn(_ r: NSRect) {
         let size = stack.fittingSize
         frame = NSRect(x: r.midX - size.width / 2, y: r.maxY - size.height - 16, width: size.width, height: size.height)
@@ -173,6 +196,10 @@ final class HUDView: NSView {
         if case .failed = app.workspace.saveState { statusLabel.textColor = .systemRed } else { statusLabel.textColor = .secondaryLabelColor }
         inputLabel.stringValue = app.runtime.inputOwnerText
         emptyHint.isHidden = !app.workspace.live.isEmpty
+        // Presentation keeps only failures visible; the workspace menu stays reachable but quiet.
+        let failing: Bool = { if case .failed = app.workspace.saveState { return true }; return false }()
+        statusPanel.isHidden = app.presenting && !failing
+        menuButton.alphaValue = app.presenting ? 0.35 : 1
         if let f = canvas.followUser {
             bannerPanel.isHidden = false
             bannerLabel.stringValue = "Following \(app.collab?.name(of: f) ?? "collaborator") — navigate to stop"

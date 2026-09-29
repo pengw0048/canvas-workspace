@@ -141,13 +141,13 @@ final class CaptureService {
     }
 
     /// Captures a whole surface or a normalized region into a new frozen image next to the source.
-    func captureObject(_ id: ObjectID, region: CGRect?, in c: CanvasView) {
+    func captureObject(_ id: ObjectID, region: CGRect?, in c: CanvasView, at target: WPoint? = nil) {
         guard let o = ws.object(id) else { return }
         if o.kind == .browser {
             app.browsers.snapshot(id) { [weak self] img in
                 guard let self else { return }
                 guard let img else { c.hud.flash("The page could not be captured"); return }
-                self.commitCapture(img, source: o, region: region, in: c, origin: "browser")
+                self.commitCapture(img, source: o, region: region, in: c, origin: "browser", at: target)
             }
             return
         }
@@ -162,7 +162,7 @@ final class CaptureService {
             case .success(let img):
                 self.app.runtime.frames[id] = img
                 self.app.runtime.frameTimes[id] = Date()
-                self.commitCapture(img, source: o, region: region, in: c, origin: "window")
+                self.commitCapture(img, source: o, region: region, in: c, origin: "window", at: target)
             case .failure(let e):
                 c.hud.flash("\(e)", seconds: 6)
                 if case CaptureError.permission = e { self.app.runtime.requestPermissions() }
@@ -176,13 +176,13 @@ final class CaptureService {
         return img.cropping(to: r)
     }
 
-    func commitCapture(_ full: CGImage, source o: CanvasObject, region: CGRect?, in c: CanvasView, origin: String) {
+    func commitCapture(_ full: CGImage, source o: CanvasObject, region: CGRect?, in c: CanvasView, origin: String, at target: WPoint? = nil) {
         guard let img = region.flatMap({ crop(full, $0) }) ?? (region == nil ? full : nil) else { c.hud.flash("The region could not be captured"); return }
         guard let png = pngData(img, maxPixels: 40_000_000) else { c.hud.flash("Encoding failed"); return }
         let content = app.runtime.contentRect(of: o)
         // World size: the region's size on the canvas at the source's presentation scale.
         let rw = content.w * (region?.width ?? 1), rh = content.h * (region?.height ?? 1)
-        let pos = placement(near: o, size: WRect(x: 0, y: 0, w: rw, h: rh), in: c)
+        let pos = target ?? placement(near: o, size: WRect(x: 0, y: 0, w: rw, h: rh), in: c)
         let src = app.session.source(o.props.sourceID)
         let capID = newID()
         do {
@@ -202,7 +202,11 @@ final class CaptureService {
             n.props.name = "Capture · \(o.props.appName ?? o.title) · \(t)"
             let nid = try ws.create(n, name: region == nil ? "Capture window" : "Capture region", assets: [a])
             c.selection = [nid]
-            if !c.camera.visibleWorld.contains(n.geom.bounds) { c.reveal(nid, highlight: false) }
+            if !c.camera.visibleWorld.intersects(n.geom.bounds) { c.reveal(nid, highlight: false) }
+            else {
+                let r = region ?? CGRect(x: 0, y: 0, width: 1, height: 1)
+                c.flyCapture(img, from: WRect(x: content.x + r.minX * content.w, y: content.y + r.minY * content.h, w: rw, h: rh), to: nid)
+            }
             if case .failed = ws.saveState { c.hud.flash("Captured, but not saved yet: \(ws.saveState.label)", seconds: 5) }
             else { c.hud.flash(region == nil ? "Captured the window" : "Captured the region") }
         } catch {

@@ -50,7 +50,7 @@ final class BrowserService: NSObject, WKNavigationDelegate {
         var s = SourceRecord(kind: .url)
         s.url = u.absoluteString
         app.session.putSource(s)
-        var o = CanvasObject(kind: .browser, geom: Geometry(x: center.x - 320, y: center.y - 230, w: 640, h: 460))
+        var o = CanvasObject(kind: .browser, geom: Geometry(x: center.x - 320, y: center.y - 215, w: 640, h: 430))
         o.props.url = u.absoluteString
         o.props.browserMode = mode
         o.props.sourceID = s.id

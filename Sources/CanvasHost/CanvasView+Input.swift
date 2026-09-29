@@ -475,6 +475,7 @@ extension CanvasView {
     override func otherMouseUp(with e: NSEvent) { drag = .none }
 
     override func mouseMoved(with e: NSEvent) {
+        toolbar?.pointerMoved(viewPoint(e), in: bounds)
         let wp = camera.toWorld(viewPoint(e))
         notePointer(wp)
         updateCursor()

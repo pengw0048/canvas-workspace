@@ -202,6 +202,12 @@ final class Automation {
                 let region = args.count == 5 ? CGRect(x: Double(args[1])!, y: Double(args[2])!, width: Double(args[3])!, height: Double(args[4])!) : nil
                 app.capture.captureObject(args[0], region: region, in: c)
                 return json(["ok": true])
+            case "captureto":
+                // captureto <id> nx ny nw nh <x> <y>: capture a region and place it at a world point.
+                let v = args.dropFirst().compactMap(Double.init)
+                guard v.count == 6 else { return json(["error": "captureto id nx ny nw nh x y"]) }
+                app.capture.captureObject(args[0], region: CGRect(x: v[0], y: v[1], width: v[2], height: v[3]), in: c, at: WPoint(x: v[4], y: v[5]))
+                return json(["ok": true])
             case "live":
                 app.runtime.toggleLive(args[0])
                 return json(["live": app.runtime.isLive(args[0])])
@@ -437,6 +443,55 @@ final class Automation {
                 return json(["achieved": app.runtime.achievedDepth[o.id]?.rawValue ?? "", "available": app.runtime.recoveryDepth(o).rawValue])
             case "revealsource":
                 app.revealSource(of: args[0], in: c)
+                return json(["ok": true])
+            case "present":
+                app.presenting = args.first != "off"
+                return json(["presenting": app.presenting])
+            case "fly":
+                // fly <x> <y> <zoom> <seconds>: animated camera move for recorded demos.
+                var cam = c.camera
+                cam.center = WPoint(x: Double(args[0]) ?? 0, y: Double(args[1]) ?? 0)
+                cam.zoom = Double(args[2]) ?? cam.zoom
+                c.setCamera(cam, animated: true, record: true, duration: Double(args.count > 3 ? args[3] : "1") ?? 1)
+                return json(["ok": true])
+            case "flyto":
+                // flyto <objectID> [margin] [seconds]
+                guard let o = ws.object(args[0]) else { return json(["error": "missing"]) }
+                var cam = c.camera
+                cam.fit(o.geom.bounds, margin: Double(args.count > 1 ? args[1] : "120") ?? 120, maxZoom: 3)
+                c.setCamera(cam, animated: true, record: true, duration: Double(args.count > 2 ? args[2] : "1") ?? 1)
+                return json(["ok": true])
+            case "pointer":
+                c.lastPointerWorld = WPoint(x: Double(args[0]) ?? 0, y: Double(args[1]) ?? 0)
+                c.lastPointerTime = Date()
+                app.collab?.publishPresence(from: c)
+                return json(["ok": true])
+            case "glide":
+                // glide <x1> <y1> <x2> <y2> <seconds>: moves this participant's pointer smoothly.
+                let v = args.compactMap(Double.init)
+                guard v.count >= 5 else { return json(["error": "glide x1 y1 x2 y2 seconds"]) }
+                let start = CACurrentMediaTime()
+                Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { t in
+                    let p = min(1, (CACurrentMediaTime() - start) / v[4])
+                    let e = p < 0.5 ? 2 * p * p : 1 - pow(-2 * p + 2, 2) / 2
+                    c.lastPointerWorld = WPoint(x: v[0] + (v[2] - v[0]) * e, y: v[1] + (v[3] - v[1]) * e)
+                    c.lastPointerTime = Date()
+                    self.app.collab?.lastPresenceSent = .distantPast
+                    self.app.collab?.publishPresence(from: c)
+                    if p >= 1 { t.invalidate() }
+                }
+                return json(["ok": true])
+            case "typeslow":
+                // typeslow <objectID> <charsPerSecond> <text…>: appends to a note as live typing.
+                let sp = arg.split(separator: " ", maxSplits: 2).map(String.init)
+                guard sp.count == 3, let o = ws.object(sp[0]), let cps = Double(sp[1]) else { return json(["error": "typeslow id cps text"]) }
+                var chars = Array(sp[2])
+                let id = o.id
+                Timer.scheduledTimer(withTimeInterval: 1 / cps, repeats: true) { t in
+                    guard !chars.isEmpty, let cur = ws.object(id) else { t.invalidate(); return }
+                    let ch = String(chars.removeFirst())
+                    try? ws.spliceText(id, baseHeads: ws.heads(cur.scope), start: cur.text.unicodeScalars.count, delete: 0, insert: ch)
+                }
                 return json(["ok": true])
             case "identity":
                 return json(["id": app.identity.id, "name": app.identity.name])

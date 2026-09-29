@@ -84,7 +84,16 @@ final class CanvasView: NSView, SceneContext {
     let overlayFill = CAShapeLayer()
     let presenceLayer = CALayer()
     var tool: Tool = .pointer { didSet { toolbar?.update(); window?.invalidateCursorRects(for: self); updateCursor() } }
-    var selection: Set<ObjectID> = [] { didSet { if selection != oldValue { selectionChanged() } } }
+    var selection: Set<ObjectID> = [] {
+        didSet {
+            guard selection != oldValue else { return }
+            // Surfaces show their title chip and full status only while selected.
+            for id in selection.symmetricDifference(oldValue) where [.app, .browser, .file, .image].contains(ws.object(id)?.kind) {
+                renderer.refreshSurface(id, ws)
+            }
+            selectionChanged()
+        }
+    }
     var enteredGroup: ObjectID?
     var drag: DragOp = .none
     var spaceHeld = false
@@ -164,6 +173,8 @@ final class CanvasView: NSView, SceneContext {
     func icon(for o: CanvasObject) -> NSImage? { app.runtime.icon(for: o) }
     func status(for o: CanvasObject) -> SurfaceStatus? { app.runtime.status(for: o) }
     var editingID: ObjectID? { editor?.objectID }
+    func isSelected(_ id: ObjectID) -> Bool { selection.contains(id) }
+    var presenting: Bool { app.presenting }
     var activeID: ObjectID? { app.runtime.activeObject }
 
     // MARK: Layout and drawing
@@ -240,24 +251,33 @@ final class CanvasView: NSView, SceneContext {
     }
 
     /// Changes the camera; records navigation history unless `record` is false.
-    func setCamera(_ c: Camera, animated: Bool = true, record: Bool = true) {
+    func setCamera(_ c: Camera, animated: Bool = true, record: Bool = true, duration: Double = 0.28, completion: (() -> Void)? = nil) {
         if record { pushBack() }
         cameraAnimation?.invalidate()
         let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        guard animated, !reduce else { camera = c; applyCamera(); return }
+        guard animated, !reduce, duration > 0 else { camera = c; applyCamera(); completion?(); return }
         let from = camera
-        let start = Date()
+        let start = CACurrentMediaTime()
         cameraAnimation = Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { [weak self] t in
             guard let self else { t.invalidate(); return }
-            let p = min(1, Date().timeIntervalSince(start) / 0.28)
-            let e = 1 - pow(1 - p, 3)
+            let p = min(1, (CACurrentMediaTime() - start) / duration)
+            // Ease in and out so long flights start and land softly.
+            let e = p < 0.5 ? 4 * p * p * p : 1 - pow(-2 * p + 2, 3) / 2
             // Interpolate zoom logarithmically for a steady feel.
             let z = exp(log(from.zoom) + (log(c.zoom) - log(from.zoom)) * e)
             self.camera.zoom = z
             self.camera.center = WPoint(x: from.center.x + (c.center.x - from.center.x) * e, y: from.center.y + (c.center.y - from.center.y) * e)
             self.applyCamera()
-            if p >= 1 { t.invalidate(); self.cameraAnimation = nil }
+            if p >= 1 {
+                t.invalidate()
+                self.cameraAnimation = nil
+                self.camera = c
+                self.applyCamera()
+                self.renderer.refreshDetail(self.ws)
+                completion?()
+            }
         }
+        RunLoop.main.add(cameraAnimation!, forMode: .common)
     }
 
     func pushBack() {
@@ -316,16 +336,12 @@ final class CanvasView: NSView, SceneContext {
         hud.update()
     }
 
-    /// Focus view at an exact camera, without animation (used before placing a real window).
-    func enterFocusView(_ id: ObjectID, camera c: Camera) {
+    /// Focus view at an exact camera; the completion runs once the camera has landed.
+    func enterFocusView(_ id: ObjectID, camera c: Camera, duration: Double = 0, completion: (() -> Void)? = nil) {
         if focusReturn == nil { focusReturn = camera }
         focusObject = id
-        cameraAnimation?.invalidate()
-        cameraAnimation = nil
-        camera = c
-        applyCamera()
-        renderer.refreshDetail(ws)
         hud.update()
+        setCamera(c, animated: duration > 0, record: false, duration: duration, completion: completion)
     }
 
     func exitFocusView() {
@@ -521,6 +537,45 @@ final class CanvasView: NSView, SceneContext {
             sel.lineDashPattern = [5, 3]
             presenceLayer.addSublayer(sel)
         }
+    }
+
+    // MARK: Capture flight
+
+    /// A short flash on the captured region, then the image flies to its new object.
+    func flyCapture(_ img: CGImage, from src: WRect, to id: ObjectID) {
+        guard let o = ws.object(id), let root = layer, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let from = camera.toView(src), to = camera.toView(o.geom.rect)
+        let flash = CALayer()
+        flash.frame = from
+        flash.backgroundColor = NSColor.white.cgColor
+        flash.cornerRadius = 6
+        root.addSublayer(flash)
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0.85
+        fade.toValue = 0
+        fade.duration = 0.35
+        flash.opacity = 0
+        flash.add(fade, forKey: "fade")
+        let chip = CALayer()
+        chip.contents = img
+        chip.contentsGravity = .resize
+        chip.frame = from
+        chip.cornerRadius = 6
+        chip.masksToBounds = true
+        chip.borderWidth = 1
+        chip.borderColor = NSColor.white.withAlphaComponent(0.8).cgColor
+        root.addSublayer(chip)
+        renderer.layers[id]?.opacity = 0
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.5)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+        CATransaction.setCompletionBlock { [weak self] in
+            chip.removeFromSuperlayer()
+            flash.removeFromSuperlayer()
+            self?.renderer.layers[id]?.opacity = 1
+        }
+        chip.frame = to
+        CATransaction.commit()
     }
 
     // MARK: Snapshot for evidence
