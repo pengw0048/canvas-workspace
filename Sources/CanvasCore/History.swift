@@ -36,7 +36,8 @@ public extension Workspace {
         try perform("Restore arrangement") { tx in
             for (id, cur) in objects where cur.scope == scope {
                 if let h = historic[id] {
-                    let fields = Field.diff(cur, h)
+                    // Previews are runtime state, not arrangement; old preview bytes may be collected.
+                    let fields = Field.diff(cur, h).filter { $0 != .prop("previewAssetID") && $0 != .prop("previewTime") }
                     guard !fields.isEmpty else { continue }
                     tx.update(id) { o in for f in fields { f.copy(from: h, into: &o) } }
                     n += 1

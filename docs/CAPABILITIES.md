@@ -111,8 +111,8 @@ and identities on the same Mac, connected over loopback TLS-PSK. **Simulated:** 
 | Capability | Status | Evidence / limitation |
 | --- | --- | --- |
 | Share a frame: preview of consequences, new scope document, private material stays out | Verified | Bob received only the frame's objects; Alice's private app surface and captures were absent. |
-| Invite-code TLS-PSK transport, auto-reconnect, stored address | Verified | Restart of either side reconnected. |
-| Concurrent text edits merge at operation level (from stale editor base) | Verified | "Alice: Research notes (Bob)" on both sides. |
+| Invite-code TLS-PSK transport, auto-reconnect, stored address | Verified | Restart of either side reconnected. Each share has its own listener and key: a code opens only its share (verified with two shares and two members; a code for share B was refused on share A's port). Removing a member rotates that share's code. Malformed or oversized messages close the connection instead of crashing the host. |
+| Concurrent text edits merge at operation level (from stale editor base) | Verified | "Alice: Research notes (Bob)" on both sides. A deletion from a stale base removes only the characters it saw, so a concurrent insertion inside the range survives (unit test). |
 | Concurrent moves are atomic transforms | Verified | Same result on both sides; no x/y mixing (also unit-tested). |
 | Offline member edits replay after the host returns | Verified | |
 | Asset fetch permission: private asset denied; published asset delivered | Verified | |

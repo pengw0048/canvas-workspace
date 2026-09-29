@@ -379,3 +379,32 @@ final class Pair {
     #expect(removed == 1)
     #expect(!s.store.isAssetDurable(p1.id) && s.store.isAssetDurable(p2.id) && s.store.isAssetDurable(cap.id))
 }
+
+@Test func concurrentInsertInsideDeletedRangeSurvives() throws {
+    let p = try Pair()
+    var n = note(0, 0, "abcdef")
+    n.scope = "shared"
+    try p.a.perform("Create") { $0.create(n) }
+    try p.sync()
+    let base = p.a.heads("shared")
+    try p.b.spliceText(n.id, baseHeads: p.b.heads("shared"), start: 3, delete: 0, insert: "X")   // abcXdef
+    try p.sync()
+    try p.a.spliceText(n.id, baseHeads: base, start: 2, delete: 2, insert: "")                     // delete "cd" from stale base
+    try p.sync()
+    #expect(p.a.object(n.id)?.text == "abXef")
+    #expect(p.b.object(n.id)?.text == "abXef")
+}
+
+@Test func malformedWireMessagesAreRejectedNotTrapped() throws {
+    var ok = WireMessage("hello", ["user": "u"], payload: Data([1, 2, 3])).encode()
+    let msgs = try WireMessage.decode(&ok)
+    #expect(msgs.count == 1 && msgs[0].payload == Data([1, 2, 3]) && ok.isEmpty)
+    var bad = Data([0, 0, 0, 4, 0, 0, 0, 100])   // header longer than the message
+    #expect(throws: WireMessage.DecodeError.self) { _ = try WireMessage.decode(&bad) }
+    var huge = Data([0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0])
+    #expect(throws: WireMessage.DecodeError.self) { _ = try WireMessage.decode(&huge) }
+    var partial = WireMessage("x").encode().prefix(6)
+    var p2 = Data(partial)
+    #expect(try WireMessage.decode(&p2).isEmpty)
+    partial = Data()
+}

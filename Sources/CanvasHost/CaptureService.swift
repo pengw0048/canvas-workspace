@@ -296,6 +296,7 @@ final class CaptureService {
     }
 
     func startLive(_ id: ObjectID, windowID: CGWindowID) {
+        stopLive(id)
         Task {
             do {
                 let w = try await scWindow(windowID)
@@ -319,7 +320,14 @@ final class CaptureService {
                 try s.addStreamOutput(ls, type: .screen, sampleHandlerQueue: queue)
                 try await s.startCapture()
                 ls.stream = s
-                await MainActor.run { self.streams[id] = ls }
+                await MainActor.run {
+                    // Live may have been turned off, or restarted, while the stream was starting.
+                    guard self.app.runtime.liveObjects.contains(id), self.streams[id] == nil else {
+                        s.stopCapture { _ in }
+                        return
+                    }
+                    self.streams[id] = ls
+                }
             } catch {
                 await MainActor.run {
                     self.app.runtime.liveObjects.remove(id)

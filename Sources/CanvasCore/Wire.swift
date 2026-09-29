@@ -15,7 +15,11 @@ public struct WireMessage: Sendable {
     public var type: String { header["t"] ?? "" }
     public subscript(_ k: String) -> String? { header[k] }
 
+    /// Largest accepted message (header plus payload).
+    public static let maxSize = 256 * 1_048_576
+
     /// [u32 total][u32 headerLen][header JSON][payload], big-endian lengths.
+    /// Callers must keep payloads under `maxSize`.
     public func encode() -> Data {
         let h = (try? JSONSerialization.data(withJSONObject: header, options: .sortedKeys)) ?? Data("{}".utf8)
         var out = Data()
@@ -27,14 +31,18 @@ public struct WireMessage: Sendable {
         return out
     }
 
+    public enum DecodeError: Error { case malformed }
+
     /// Decodes as many whole messages as `buffer` holds, leaving the remainder.
-    public static func decode(_ buffer: inout Data) -> [WireMessage] {
+    /// Throws on lengths that are inconsistent or over `maxSize`; the connection should then close.
+    public static func decode(_ buffer: inout Data) throws -> [WireMessage] {
         var out: [WireMessage] = []
         while buffer.count >= 8 {
             let b = [UInt8](buffer.prefix(8))
             let total = Int(UInt32(b[0]) << 24 | UInt32(b[1]) << 16 | UInt32(b[2]) << 8 | UInt32(b[3]))
-            guard buffer.count >= 4 + total else { break }
             let hl = Int(UInt32(b[4]) << 24 | UInt32(b[5]) << 16 | UInt32(b[6]) << 8 | UInt32(b[7]))
+            guard total >= 4, total <= maxSize, hl <= total - 4 else { throw DecodeError.malformed }
+            guard buffer.count >= 4 + total else { break }
             let start = buffer.startIndex
             let hData = buffer.subdata(in: (start + 8)..<(start + 8 + hl))
             let payload = buffer.subdata(in: (start + 8 + hl)..<(start + 4 + total))

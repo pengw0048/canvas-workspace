@@ -45,7 +45,7 @@ public final class ScopeDocument {
         return nil
     }
 
-    func objectMap(_ id: ObjectID) -> ObjId? {
+    public func objectMap(_ id: ObjectID) -> ObjId? {
         guard let objs = objectsMap else { return nil }
         if case .Object(let o, _)? = try? doc.get(obj: objs, key: id) { return o }
         return nil
@@ -160,20 +160,41 @@ public final class ScopeDocument {
     /// Positions count Unicode scalars.
     public func splice(_ oid: ObjectID, baseHeads: Set<ChangeHash>, start: Int, delete: Int, insert: String) throws {
         let t = try textObject(oid)
-        let baseLen = Int(doc.lengthAt(obj: t, heads: baseHeads))
-        var pos: UInt64
-        if start >= baseLen || baseHeads.isEmpty {
-            // End-anchored: map the last character before the edit, then step past it.
-            if start > 0, !baseHeads.isEmpty, let c = try? doc.cursor(obj: t, position: UInt64(start - 1), heads: baseHeads) {
-                pos = (try doc.position(obj: t, cursor: c)) + 1
-            } else { pos = baseHeads.isEmpty ? UInt64(start) : doc.length(obj: t) }
-        } else {
-            let c = try doc.cursor(obj: t, position: UInt64(start), heads: baseHeads)
-            pos = try doc.position(obj: t, cursor: c)
+        let baseLen = baseHeads.isEmpty ? Int(doc.length(obj: t)) : Int(doc.lengthAt(obj: t, heads: baseHeads))
+        func mapped(_ i: Int) -> UInt64? {
+            guard !baseHeads.isEmpty, i < baseLen, let c = try? doc.cursor(obj: t, position: UInt64(i), heads: baseHeads) else { return nil }
+            return try? doc.position(obj: t, cursor: c)
         }
+        // Delete only the base characters that still exist; concurrent insertions inside the range survive.
+        if delete > 0 {
+            let del = min(start + delete, baseLen)
+            if baseHeads.isEmpty {
+                try doc.spliceText(obj: t, start: UInt64(start), delete: Int64(del - start), value: nil)
+            } else {
+                let base = Array(try doc.textAt(obj: t, heads: baseHeads).unicodeScalars)
+                let cur = Array(try doc.text(obj: t).unicodeScalars)
+                let boundary = mapped(del)
+                var positions = Set<Int>()
+                for i in start..<del {
+                    guard let p = mapped(i).map(Int.init), p < cur.count, cur[p] == base[i] else { continue }
+                    if let b = boundary, p >= Int(b) { continue }
+                    positions.insert(p)
+                }
+                var runs: [(Int, Int)] = []
+                for p in positions.sorted() {
+                    if let last = runs.last, last.0 + last.1 == p { runs[runs.count - 1].1 += 1 } else { runs.append((p, 1)) }
+                }
+                for r in runs.reversed() { try doc.spliceText(obj: t, start: UInt64(r.0), delete: Int64(r.1), value: nil) }
+            }
+        }
+        guard !insert.isEmpty else { return }
+        var pos: UInt64
+        if baseHeads.isEmpty { pos = UInt64(start) }
+        else if start < baseLen, let m = mapped(start) { pos = m }
+        else if start > 0, let m = mapped(start - 1) { pos = m + 1 }  // end-anchored
+        else { pos = start == 0 ? 0 : doc.length(obj: t) }
         pos = min(pos, doc.length(obj: t))
-        let del = min(Int64(delete), Int64(doc.length(obj: t) - pos))
-        try doc.spliceText(obj: t, start: pos, delete: del, value: insert.isEmpty ? nil : insert)
+        try doc.spliceText(obj: t, start: pos, delete: 0, value: insert)
     }
 
     /// Replaces the formatting of one mark name with `desired` spans.

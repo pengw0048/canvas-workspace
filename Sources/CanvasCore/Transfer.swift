@@ -92,7 +92,9 @@ public extension Workspace {
         let frame = WRect.union(top.map(\.geom.bounds)).flatMap { frameContaining($0) }
         try perform("Paste") { tx in
             for var o in objs {
-                if o.parent == nil && o.kind != .connector, let f = frame { o.parent = f.id; o.scope = f.scope }
+                if o.parent == nil && o.kind != .connector, let f = frame { o.parent = f.id }
+                // Everything pasted into a frame, including nested members, joins the frame's scope.
+                if let f = frame { o.scope = f.scope }
                 tx.create(o)
             }
         }

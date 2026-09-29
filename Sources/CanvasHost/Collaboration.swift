@@ -19,6 +19,8 @@ struct ShareInfo: Codable {
     var viewers: [String] = []
     var viewOnly: Bool = false
     var lastContact: Double?
+    /// Host: this share's listening port, reused so members can reconnect to a stored address.
+    var port: UInt16?
 
     init(scopeID: ScopeID, title: String, hosted: Bool, inviteCode: String? = nil, hostEndpoint: String? = nil) {
         self.scopeID = scopeID; self.title = title; self.hosted = hosted; self.inviteCode = inviteCode; self.hostEndpoint = hostEndpoint
@@ -38,6 +40,7 @@ struct ShareInfo: Codable {
         viewers = try c.decodeIfPresent([String].self, forKey: .viewers) ?? []
         viewOnly = try c.decodeIfPresent(Bool.self, forKey: .viewOnly) ?? false
         lastContact = try c.decodeIfPresent(Double.self, forKey: .lastContact)
+        port = try c.decodeIfPresent(UInt16.self, forKey: .port)
     }
 }
 
@@ -59,6 +62,9 @@ final class Peer {
     var name: String?
     var scopes: Set<ScopeID> = []
     var viewOnly: Set<ScopeID> = []
+    /// Host side: the share whose invite code (TLS key) this connection used.
+    var hostedScope: ScopeID?
+    var uploadedAssets: Set<AssetID> = []
     var sync: [ScopeID: SyncState] = [:]
     var pendingSends = 0
     var onMessage: ((Peer, WireMessage) -> Void)?
@@ -83,7 +89,13 @@ final class Peer {
         conn.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self] data, _, done, err in
             guard let self else { return }
             if let data { self.buffer.append(data) }
-            for m in WireMessage.decode(&self.buffer) { self.onMessage?(self, m) }
+            do {
+                for m in try WireMessage.decode(&self.buffer) { self.onMessage?(self, m) }
+            } catch {
+                Diagnostics.record("network", "closed a connection that sent a malformed message")
+                self.close()
+                return
+            }
             if done || err != nil { self.close(); return }
             self.receive()
         }
@@ -107,8 +119,10 @@ final class Collaboration: NSObject {
     unowned let app: AppController
     var shares: [ScopeID: ShareInfo] = [:]
     // Host side
-    var listener: NWListener?
-    var listenPort: UInt16?
+    /// One listener per hosted share: its invite code is that share's key, so a code opens only its share.
+    var listeners: [ScopeID: NWListener] = [:]
+    var listenPorts: [ScopeID: UInt16] = [:]
+    var listenPort: UInt16? { listenPorts.values.min() }
     var peers: [Peer] = []
     var arbiters: [ObjectID: ControlArbiter] = [:]
     var liveShared: Set<ObjectID> = []
@@ -121,7 +135,7 @@ final class Collaboration: NSObject {
     var connecting = false
     var myGrants: [ObjectID: UInt64] = [:]
     var controllers: [ObjectID: String] = [:]
-    var seq: UInt64 = 0
+    var seqs: [ObjectID: UInt64] = [:]
     var remoteFrames: [ObjectID: (CGImage, Date)] = [:]
     var requestedAssets: Set<AssetID> = []
     // Both
@@ -154,7 +168,7 @@ final class Collaboration: NSObject {
     // MARK: Status
 
     var statusText: String? {
-        if listener != nil {
+        if !listeners.isEmpty {
             let n = peers.filter { $0.userID != nil }.count
             return n == 0 ? "Sharing · no one connected" : "Sharing · \(n) connected"
         }
@@ -302,34 +316,46 @@ final class Collaboration: NSObject {
         return p
     }
 
-    /// One listener per device; each hosted share has its own invite code, tried in turn by TLS.
+    /// Starts a listener for every hosted share that lacks one.
     func startHosting() {
-        guard listener == nil, let code = shares.values.first(where: { $0.hosted })?.inviteCode else { return }
-        do {
-            // Reuse the previous port so members can reconnect to a stored address.
-            let port = UInt16(ProcessInfo.processInfo.environment["CANVAS_PORT"] ?? "") ?? UInt16(app.session.store.meta("listenPort") ?? "") ?? 0
-            let l = try NWListener(using: Self.parameters(code: code), on: port == 0 ? .any : NWEndpoint.Port(rawValue: port)!)
-            l.service = NWListener.Service(name: "\(app.identity.name) — Canvas Workspace", type: "_canvasws._tcp")
-            l.stateUpdateHandler = { [weak self] st in
-                DispatchQueue.main.async {
-                    if case .ready = st {
-                        self?.listenPort = l.port?.rawValue
-                        if let p = l.port?.rawValue { try? self?.app.session.store.setMeta("listenPort", "\(p)") }
-                        self?.refreshUI()
+        let envPort = UInt16(ProcessInfo.processInfo.environment["CANVAS_PORT"] ?? "")
+        for (i, share) in shares.values.filter({ $0.hosted }).sorted(by: { $0.scopeID < $1.scopeID }).enumerated() where listeners[share.scopeID] == nil {
+            guard let code = share.inviteCode else { continue }
+            let sid = share.scopeID
+            do {
+                let port = share.port ?? (i == 0 ? envPort : nil) ?? 0
+                let l = try NWListener(using: Self.parameters(code: code), on: port == 0 ? .any : NWEndpoint.Port(rawValue: port)!)
+                l.service = NWListener.Service(name: "\(share.title) — \(app.identity.name)", type: "_canvasws._tcp")
+                l.stateUpdateHandler = { [weak self] st in
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        if case .ready = st, let p = l.port?.rawValue {
+                            self.listenPorts[sid] = p
+                            self.shares[sid]?.port = p
+                            self.saveShare(sid)
+                            self.refreshUI()
+                        }
+                        if case .failed(let e) = st { self.app.report(e); self.listeners[sid] = nil; self.listenPorts[sid] = nil }
                     }
-                    if case .failed(let e) = st { self?.app.report(e); self?.listener = nil }
                 }
-            }
-            l.newConnectionHandler = { [weak self] c in
-                DispatchQueue.main.async { self?.accept(c) }
-            }
-            l.start(queue: .main)
-            listener = l
-        } catch { app.report(error) }
+                l.newConnectionHandler = { [weak self] c in
+                    DispatchQueue.main.async { self?.accept(c, share: sid) }
+                }
+                l.start(queue: .main)
+                listeners[sid] = l
+            } catch { app.report(error) }
+        }
     }
 
-    func accept(_ c: NWConnection) {
+    func stopListener(_ sid: ScopeID) {
+        listeners[sid]?.cancel()
+        listeners[sid] = nil
+        listenPorts[sid] = nil
+    }
+
+    func accept(_ c: NWConnection, share: ScopeID) {
         let p = Peer(c)
+        p.hostedScope = share
         p.onMessage = { [weak self] peer, m in self?.hostReceive(peer, m) }
         p.onClose = { [weak self] peer in self?.peerClosed(peer) }
         peers.append(p)
@@ -352,9 +378,8 @@ final class Collaboration: NSObject {
         switch m.type {
         case "hello":
             guard let u = m["user"], let n = m["name"] else { p.close(); return }
-            // The invite code is the TLS key for the first hosted share; membership is recorded per share.
-            let hosted = shares.values.filter { $0.hosted }
-            let allowed = hosted.filter { !$0.revoked.contains(u) }
+            // The TLS key proved the invite code of exactly one share; only that share is granted.
+            let allowed = shares.values.filter { $0.hosted && $0.scopeID == p.hostedScope && !$0.revoked.contains(u) }
             if allowed.isEmpty {
                 p.send(WireMessage("access-revoked", ["reason": "The host revoked your access"]))
                 p.close()
@@ -410,7 +435,11 @@ final class Collaboration: NSObject {
             updatePresence(from: m, user: u)
             for q in peers where q !== p && q.userID != nil { q.send(m) }
         case "control-request":
-            guard let o = m["o"], let u = p.userID else { return }
+            // Only editors of the scope that holds the surface may ask.
+            guard let o = m["o"], let u = p.userID, let obj = ws.object(o), p.scopes.subtracting(p.viewOnly).contains(obj.scope) else {
+                p.send(WireMessage("control-denied", ["o": m["o"] ?? "", "reason": "You do not have edit access to this surface"]))
+                return
+            }
             hostControlRequest(o, from: u, name: p.name ?? "A collaborator")
         case "control-release":
             guard let o = m["o"], let u = p.userID, arbiters[o]?.controller == u else { return }
@@ -483,6 +512,8 @@ final class Collaboration: NSObject {
             send(to: u, WireMessage("control-denied", ["o": o, "reason": "The host declined"]))
             return
         }
+        // The requester may have left while the dialog was open; never grant to a departed peer.
+        guard peers.contains(where: { $0.userID == u && !$0.closed }) else { return }
         var arb = arbiters[o] ?? ControlArbiter()
         let (g, release) = arb.grant(to: u)
         arbiters[o] = arb
@@ -857,7 +888,7 @@ final class Collaboration: NSObject {
             guard let o = m["o"], let g = UInt64(m["g"] ?? "") else { return }
             myGrants[o] = g
             controllers[o] = me
-            seq = 0
+            seqs[o] = 0
             app.activeCanvas?.hud.flash("You control this application. Press ⌃⌥Space to release.", seconds: 4)
             app.runtime.refreshAll(o)
             refreshUI()
@@ -898,8 +929,12 @@ final class Collaboration: NSObject {
 
     /// Material a member places in a shared scope uploads its bytes to the host.
     func uploadMissingAssets(_ s: ScopeID) {
-        guard let doc = ws.scopes[s], let u = upstream else { return }
-        for a in doc.referencedAssets() { if let d = app.session.store.assetData(a) { u.send(WireMessage("asset", ["id": a], payload: d)) } }
+        guard let doc = ws.scopes[s], let u = upstream, !(shares[s]?.viewOnly ?? false) else { return }
+        for a in doc.referencedAssets() where !u.uploadedAssets.contains(a) {
+            guard let d = app.session.store.assetData(a) else { continue }
+            u.uploadedAssets.insert(a)
+            u.send(WireMessage("asset", ["id": a], payload: d))
+        }
     }
 
     func publishAssets(for ids: [ObjectID]) {
@@ -951,8 +986,9 @@ final class Collaboration: NSObject {
 
     func sendInput(_ e: RemoteInputEvent, to id: ObjectID) {
         guard let g = myGrants[id], let u = upstream else { return }
-        seq += 1
-        u.send(WireMessage("input", ["o": id, "g": "\(g)", "seq": "\(seq)"], payload: (try? JSONEncoder().encode(e)) ?? Data()))
+        let n = (seqs[id] ?? 0) + 1
+        seqs[id] = n
+        u.send(WireMessage("input", ["o": id, "g": "\(g)", "seq": "\(n)"], payload: (try? JSONEncoder().encode(e)) ?? Data()))
     }
 
     func transferClipboardText(to id: ObjectID) {
@@ -972,6 +1008,10 @@ final class Collaboration: NSObject {
             url = p.url
         }
         guard let url, let d = try? Data(contentsOf: url) else { return }
+        guard d.count < WireMessage.maxSize - 4096 else {
+            app.activeCanvas?.hud.flash("The file is too large to transfer (limit \(WireMessage.maxSize / 1_048_576) MB)")
+            return
+        }
         u.send(WireMessage("transfer-file", ["o": id, "g": "\(g)", "name": url.lastPathComponent], payload: d))
         app.activeCanvas?.hud.flash("Sending \(url.lastPathComponent) (\(d.count) bytes)…")
     }
@@ -1074,7 +1114,7 @@ final class Collaboration: NSObject {
         for p in peers { p.close() }
         upstream?.onClose = nil
         upstream?.close()
-        listener?.cancel()
+        for (sid, _) in listeners { stopListener(sid) }
         presenceTimer?.invalidate()
         reclaimTimer?.invalidate()
         browser?.cancel()
@@ -1092,13 +1132,19 @@ final class Collaboration: NSObject {
         refreshUI()
     }
 
+    /// Revokes a member. Member IDs are self-chosen, so the share's invite code also rotates; members
+    /// who stay keep their connection and need the new code to reconnect later.
     func removeMember(_ user: String) {
-        for (id, var s) in shares where s.hosted {
+        for (id, var s) in shares where s.hosted && s.members[user] != nil {
             s.members[user] = nil
             if !s.revoked.contains(user) { s.revoked.append(user) }
+            s.inviteCode = Self.makeInviteCode()
+            s.port = nil
             shares[id] = s
             saveShare(id)
+            stopListener(id)
         }
+        startHosting()
         for p in peers where p.userID == user {
             p.send(WireMessage("access-revoked", ["reason": "The host removed your access"]))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { p.close() }

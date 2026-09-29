@@ -221,6 +221,15 @@ public final class Workspace {
         if let ro = tx.order.compactMap({ tx.working[$0]?.scope }).first(where: { readOnlyScopes.contains($0) }) {
             throw CanvasError.permission("You can view but not edit this shared material (\(ro))")
         }
+        // Validate every target before writing, so a failure never leaves partial operations behind.
+        for id in tx.order {
+            guard let after = tx.working[id] else { continue }
+            guard let scope = scopes[after.scope], scope.isInitialized else { throw CanvasError.scopeNotReady(after.scope) }
+            if let before = tx.original[id] ?? nil {
+                guard before.scope == after.scope else { throw CanvasError.permission("Use publication to move objects between scopes") }
+                guard scope.objectMap(id) != nil else { throw CanvasError.missingObject(id) }
+            }
+        }
         var changes: [FieldChange] = []
         var touchedScopes = Set<ScopeID>()
         for id in tx.order {
@@ -244,16 +253,23 @@ public final class Workspace {
             encoded[s] = scopes[s]!.takeNewChanges()
         }
         let changed = Set(tx.order)
-        for id in changed { if let o = tx.working[id] { objects[id] = o } }
-        persist(encoded, assets: assets)
-        if recordUndo && !changes.isEmpty {
-            undoStack.append(UndoEntry(name: name, changes: changes))
-            if undoStack.count > 500 { undoStack.removeFirst(undoStack.count - 500) }
-            redoStack.removeAll()
+        let textChanged = Set(changes.filter { $0.field == .text }.map(\.id))
+        for id in changed {
+            guard let o = tx.working[id] else { continue }
+            // Text writes shift formatting spans inside Automerge; re-read so cached marks stay correct.
+            objects[id] = textChanged.contains(id) ? (scopes[o.scope]?.read(id) ?? o) : o
         }
+        persist(encoded, assets: assets)
+        if recordUndo && !changes.isEmpty { recordUndoEntry(UndoEntry(name: name, changes: changes)) }
         for s in touchedScopes { onLocalScopeChange?(s) }
         onChange?(changed)
         return changed
+    }
+
+    func recordUndoEntry(_ e: UndoEntry) {
+        undoStack.append(e)
+        if undoStack.count > 500 { undoStack.removeFirst(undoStack.count - 500) }
+        redoStack.removeAll()
     }
 
     static func commitMessage(name: String, author: String) -> String {
@@ -270,12 +286,10 @@ public final class Workspace {
         if readOnlyScopes.contains(before.scope) { throw CanvasError.permission("You can view but not edit this shared material") }
         try s.splice(id, baseHeads: baseHeads, start: start, delete: delete, insert: insert)
         s.commit(Self.commitMessage(name: "Edit text", author: user))
-        var after = before
-        after.text = s.read(id)?.text ?? before.text
+        let after = s.read(id) ?? before
         objects[id] = after
         persist([s.id: s.takeNewChanges()], assets: [])
-        undoStack.append(UndoEntry(name: "Edit text", changes: [FieldChange(id: id, field: .text, before: before, after: after)]))
-        redoStack.removeAll()
+        recordUndoEntry(UndoEntry(name: "Edit text", changes: [FieldChange(id: id, field: .text, before: before, after: after)]))
         onLocalScopeChange?(s.id)
         onChange?([id])
     }
@@ -306,16 +320,18 @@ public final class Workspace {
     /// Reverses this author's latest command without overwriting later edits by others.
     @discardableResult
     public func undo() throws -> UndoResult? {
-        guard let entry = undoStack.popLast() else { return nil }
+        guard let entry = undoStack.last else { return nil }
         let (applied, conflicts) = try invert(entry, forward: false)
+        undoStack.removeLast()
         redoStack.append(applied)
         return UndoResult(name: entry.name, conflicts: conflicts)
     }
 
     @discardableResult
     public func redo() throws -> UndoResult? {
-        guard let entry = redoStack.popLast() else { return nil }
+        guard let entry = redoStack.last else { return nil }
         let (applied, conflicts) = try invert(entry, forward: true)
+        redoStack.removeLast()
         undoStack.append(applied)
         return UndoResult(name: entry.name, conflicts: conflicts)
     }

@@ -325,7 +325,8 @@ extension SceneRenderer {
 final class CompositionProvider: NSObject, NSPasteboardItemDataProvider {
     static var alive: [CompositionProvider] = []
     let snapshot: Workspace
-    unowned let service: PasteboardService
+    /// Weak: switching workspaces replaces the service while the clipboard still holds this provider.
+    weak var service: PasteboardService?
     var rendered: CGImage?
 
     init?(snapshotOf ids: [ObjectID], service: PasteboardService) {
@@ -343,14 +344,14 @@ final class CompositionProvider: NSObject, NSPasteboardItemDataProvider {
     }
 
     func image() -> CGImage? {
-        if rendered == nil { rendered = service.renderComposition(snapshot.live.map(\.id), in: snapshot) }
+        if rendered == nil { rendered = service?.renderComposition(snapshot.live.map(\.id), in: snapshot) }
         return rendered
     }
 
     func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
         guard let img = image() else { Diagnostics.record("clipboard", "deferred render failed"); return }
         if type == .png, let d = pngData(img, maxPixels: 60_000_000) { item.setData(d, forType: .png) }
-        if type == .pdfType { item.setData(service.pdfData(img), forType: .pdfType) }
+        if type == .pdfType, let service { item.setData(service.pdfData(img), forType: .pdfType) }
     }
 
     func pasteboardFinishedWithDataProvider(_ pasteboard: NSPasteboard) {

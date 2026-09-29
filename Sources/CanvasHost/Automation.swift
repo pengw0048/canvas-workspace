@@ -238,7 +238,8 @@ final class Automation {
                 app.collab?.startHosting()
                 return json(["scope": sid, "code": code])
             case "port":
-                return json(["port": app.collab?.listenPort ?? 0])
+                let sp = args.first.flatMap { app.collab?.listenPorts[$0] } ?? app.collab?.listenPort ?? 0
+                return json(["port": sp, "ports": app.collab?.listenPorts ?? [:], "codes": app.collab?.shares.values.filter(\.hosted).map { "\($0.scopeID)|\($0.inviteCode ?? "")" } ?? []])
             case "join":
                 app.collab?.connect(to: ShareInfo(scopeID: "pending", title: "Joining", hosted: false, inviteCode: args[0], hostEndpoint: args[1]))
                 return json(["ok": true])
