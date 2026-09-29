@@ -200,8 +200,12 @@ final class SceneRenderer {
 
     func rescaleText(_ l: ObjectLayer, _ o: CanvasObject) {
         let s = textScale(o)
-        for t in [l.text, l.label, l.badge] where !t.isHidden && abs(t.contentsScale - s) > max(0.1, s * 0.2) {
-            t.contentsScale = s
+        for t in [l.text, l.label, l.badge] where !t.isHidden {
+            // Chips and badges are counter-scaled to a constant screen size, so they always
+            // rasterize at the display's scale; world-sized text follows the zoom.
+            let want = t.affineTransform().isIdentity ? s : backingScale
+            guard abs(t.contentsScale - want) > max(0.1, want * 0.2) else { continue }
+            t.contentsScale = want
             t.setNeedsDisplay()
         }
     }
@@ -543,7 +547,9 @@ final class SceneRenderer {
             l.label.contentsScale = backingScale
             l.label.setNeedsDisplay()
         }
-        if let st = context?.status(for: o) { setBadge(l, st, width: fit.maxX, top: fit.minY, selected: selected) }
+        // With a title chip, the badge sits right after it instead of over it.
+        let chipEnd: CGFloat? = l.label.isHidden ? nil : fit.minX + (l.label.bounds.width + 6) * s
+        if let st = context?.status(for: o) { setBadge(l, st, width: fit.maxX, top: fit.minY, selected: selected, leading: chipEnd) }
     }
 
     /// File surfaces (and icon-level detail for windows).
@@ -618,7 +624,7 @@ final class SceneRenderer {
 
     /// Status badges stay small. Problems always show; "Live" is a dot unless selected; ordinary
     /// status (such as preview age) appears only on selection. Presentation mode keeps problems only.
-    func setBadge(_ l: ObjectLayer, _ st: SurfaceStatus, width: CGFloat, top: CGFloat, selected: Bool) {
+    func setBadge(_ l: ObjectLayer, _ st: SurfaceStatus, width: CGFloat, top: CGFloat, selected: Bool, leading: CGFloat? = nil) {
         let presenting = context?.presenting ?? false
         let problem = st.tone == .warning || st.tone == .error
         guard problem || (!presenting && (selected || st.tone == .live)) else { l.badge.isHidden = true; return }
@@ -644,7 +650,11 @@ final class SceneRenderer {
         l.badge.borderColor = NSColor.white.cgColor
         l.badge.bounds = CGRect(x: 0, y: 0, width: w, height: h)
         l.badge.setAffineTransform(CGAffineTransform(scaleX: s, y: s))
-        l.badge.position = CGPoint(x: width - (w + 6) * s, y: top - (h + 6) * s)
+        if let leading {
+            l.badge.position = CGPoint(x: leading, y: top - (23 + h) / 2 * s - 6 * s)
+        } else {
+            l.badge.position = CGPoint(x: width - (w + 6) * s, y: top - (h + 6) * s)
+        }
         l.badge.contentsScale = backingScale
         l.badge.setNeedsDisplay()
     }
