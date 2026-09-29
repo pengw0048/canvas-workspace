@@ -121,8 +121,8 @@ and identities on the same Mac, connected over loopback TLS-PSK. **Simulated:** 
 | Shared browser runtime: single controller, generation tokens, stale/replayed events rejected, reclaim | Verified | Controller click incremented the page counter; generation 0 and post-reclaim generation 1 events rejected. Grant was issued through automation instead of the host's dialog. |
 | Shared native app: live frames, grant, remote input, local takeover reclaim, stale grants | Verified | Bob (second process) saw TextEdit live ("Live from host"), clicked and typed into the host's real TextEdit document, and lost control whenever the host used the app locally; his later and replayed events were rejected. A Dock-layer target-check bug found on the way was fixed. When the host quit, Bob kept the last published frame with "Host offline". |
 | Explicit transfers: controller text/file into the remote app, copy from the remote app | Unverified | Host restores its own clipboard afterwards unless it changed meanwhile. |
-| Reference page mode (per-user rendering, captures) | Verified (page load and preview) | |
-| Provider-collaborative document mode | Unverified | Opens the link in the user's own browser; no credentials copied. |
+| Reference page mode (per-user rendering, captures) | Verified | example.com loaded in the embedded session, labeled "as rendered for you", and captured to a frozen image. |
+| Provider-collaborative document mode | Verified (labeling, no embedding) / Unverified (two provider accounts) | The object opens the link in each person's own browser; nothing is embedded and no credentials are copied. |
 | Purpose-built adapters, scroll-follow | Not implemented | |
 | View-only membership | Verified | A view-only member's editor refuses changes; a modified client that edits anyway has its changes ignored by the host (diagnostic recorded), so they never reach other members. Role changes reconnect the member. |
 | Runtime sharing from a member (not the session host) | Not implemented | Only the session host can share applications. |
