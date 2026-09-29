@@ -545,6 +545,7 @@ final class Collaboration: NSObject {
 
     func reclaim(_ o: ObjectID, reason: String) {
         guard var arb = arbiters[o], arb.controller != nil else { return }
+        Diagnostics.record("control", "reclaimed: \(reason)")
         let release = arb.revoke()
         arbiters[o] = arb
         releaseHeld(release, object: o)

@@ -120,7 +120,7 @@ and identities on the same Mac, connected over loopback TLS-PSK. **Simulated:** 
 | Revoke member → future access denied, member keeps a private recovered copy | Verified | Bob's shared scope was removed, its 12 objects kept as private copies; rejoining with the code and joining with a wrong code were both refused. |
 | Shared browser runtime: single controller, generation tokens, stale/replayed events rejected, reclaim | Verified | Controller click incremented the page counter; generation 0 and post-reclaim generation 1 events rejected. Grant was issued through automation instead of the host's dialog. |
 | Shared native app: live frames, grant, remote input, local takeover reclaim, stale grants | Verified | Bob (second process) saw TextEdit live ("Live from host"), clicked and typed into the host's real TextEdit document, and lost control whenever the host used the app locally; his later and replayed events were rejected. A Dock-layer target-check bug found on the way was fixed. When the host quit, Bob kept the last published frame with "Host offline". |
-| Explicit transfers: controller text/file into the remote app, copy from the remote app | Verified (text into a shared browser session) / Not working yet (native app) | Text sent by the controller arrived in the shared page's focused field without touching any clipboard. For TextEdit neither the text nor the file arrived: the first file transfer raised macOS's Downloads-folder permission prompt, which blocks the host until answered. Shortcut injection moved to the HID path, file transfers fall back to the workspace folder, and outcomes are logged; needs a re-run. |
+| Explicit transfers: controller text/file into the remote app, copy from the remote app | Verified | Controller text was pasted into the host's TextEdit; a controller file arrived in ~/Downloads/Canvas Workspace Transfers and was pasted; copy-from-app returned the host selection ("Fixture") to the controller's clipboard. The host clipboard was restored afterwards. Text into a shared browser session goes straight into the page. File writes run off the main thread so a folder-permission prompt cannot freeze the host. |
 | Reference page mode (per-user rendering, captures) | Verified | example.com loaded in the embedded session, labeled "as rendered for you", and captured to a frozen image. |
 | Provider-collaborative document mode | Verified (labeling, no embedding) / Unverified (two provider accounts) | The object opens the link in each person's own browser; nothing is embedded and no credentials are copied. |
 | Purpose-built adapters, scroll-follow | Not implemented | |
@@ -150,8 +150,7 @@ same scene used 825 MB, and three live surfaces used 100 % CPU and 1.2 GB.
 
 ## Next steps
 
-1. In a notified input window: re-run explicit remote transfers; drag in image data and file
-   promises.
+1. In a notified input window: drag in image data and file promises.
 2. Multi-display behavior on a machine with two displays.
 3. Performance with three live surfaces and two participants.
 4. Workspace history preview (§8.5), multiple workspaces.
