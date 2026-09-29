@@ -16,6 +16,8 @@ protocol SceneContext: AnyObject {
     func status(for o: CanvasObject) -> SurfaceStatus?
     var editingID: ObjectID? { get }
     var activeID: ObjectID? { get }
+    /// The object under the pointer, for hover-only chrome such as the full address.
+    var hoveredID: ObjectID? { get }
     func isSelected(_ id: ObjectID) -> Bool
     /// Presentation mode keeps only consequential status visible.
     var presenting: Bool { get }
@@ -355,6 +357,9 @@ final class SceneRenderer {
             l.body.shadowColor = NSColor.black.cgColor
             l.body.shadowPath = CGPath(roundedRect: full, cornerWidth: 4, cornerHeight: 4, transform: nil)
             setText(l.text, o, frame: full, inset: CGSize(width: 14, height: 12), color: NSColor(white: 0.1, alpha: 1), size: o.props.fontSize ?? 18, hidden: editing)
+            if let who = o.props.authorName, !who.isEmpty {
+                setLabel(l.label, who, frame: CGRect(x: 14, y: size.height - 26, width: size.width - 28, height: 16), size: 12, color: NSColor(white: 0, alpha: 0.38))
+            }
         case .text:
             setText(l.text, o, frame: full, inset: .zero, color: NSColor(hex: o.props.color) ?? Theme.text, size: o.props.fontSize ?? 20, hidden: editing)
         case .shape:
@@ -544,7 +549,9 @@ final class SceneRenderer {
         l.image.backgroundColor = nil
         l.bucket = ImageCache.bucket(for: pixelsNeeded(o))
         l.image.contents = context?.surfaceContents(for: o, pixels: pixelsNeeded(o))
-        if selected || active || l.detail == .thumbnail {
+        if o.kind == .browser {
+            configureAddressBar(l, o, fit: fit, hovered: context?.hoveredID == o.id)
+        } else if selected || active || l.detail == .thumbnail {
             let chip = NSMutableAttributedString()
             if let icon = context?.icon(for: o) {
                 let att = NSTextAttachment()
@@ -641,6 +648,39 @@ final class SceneRenderer {
             }
         }
         if let status { setBadge(l, status, width: size.width, top: 0, selected: context?.isSelected(o.id) ?? false) }
+    }
+
+    /// Web pages carry a floating address bar: the short address, or the whole URL while hovered.
+    func configureAddressBar(_ l: ObjectLayer, _ o: CanvasObject, fit: CGRect, hovered: Bool) {
+        let s = 1 / camera.zoom
+        let url = o.props.url.flatMap(URL.init(string:))
+        let secure = url?.scheme == "https"
+        let full = url.map { $0.isFileURL ? $0.path : $0.absoluteString } ?? ""
+        let short = url.map { $0.isFileURL ? $0.lastPathComponent : ($0.host ?? "") + ($0.path.count > 1 ? $0.path : "") } ?? o.title
+        let text = NSMutableAttributedString(string: (secure ? "🔒 " : "◎ "), attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: Theme.secondaryText])
+        text.append(NSAttributedString(string: hovered ? full : short, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .regular), .foregroundColor: Theme.text]))
+        let maxW = max(160, fit.width / s)
+        let w = hovered ? min(max(text.size().width + 28, 220), maxW) : min(max(text.size().width + 28, 160), maxW)
+        l.label.isHidden = false
+        l.label.attributed = text
+        l.label.inset = CGSize(width: 12, height: 4)
+        l.label.backgroundColor = Theme.cardBackground.cg(appearance)
+        l.label.cornerRadius = 11.5
+        l.label.borderWidth = hovered ? 1 : 0.5
+        l.label.borderColor = (hovered ? Theme.focus : Theme.cardBorder).cg(appearance)
+        l.label.bounds = CGRect(x: 0, y: 0, width: w, height: 23)
+        l.label.pin = (CGPoint(x: fit.minX, y: fit.minY), CGPoint(x: 0, y: -29))
+        l.label.counterScale(s)
+        l.label.contentsScale = backingScale
+        l.label.setNeedsDisplay()
+    }
+
+    /// The address bar of a web page in view coordinates, for clicks.
+    func addressBarRect(_ id: ObjectID) -> CGRect? {
+        guard let l = layers[id], let o = l.lastObject, o.kind == .browser, !l.label.isHidden, !l.isHidden else { return nil }
+        let fit = Self.fitRect(o, in: CGRect(origin: .zero, size: CGSize(width: o.geom.w, height: o.geom.h)))
+        let p = camera.toView(WPoint(x: o.geom.x + fit.minX, y: o.geom.y + fit.minY))
+        return CGRect(x: p.x, y: p.y - 29, width: l.label.bounds.width, height: 23)
     }
 
     /// Status badges stay small. Problems always show; "Live" is a dot unless selected; ordinary

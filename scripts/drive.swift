@@ -1,5 +1,5 @@
 // Posts real input events for acceptance runs. Requires Accessibility.
-// drive click X Y | drag X1 Y1 X2 Y2 | type TEXT | keys MS TEXT | hover X Y | key CODE [cmd,shift,opt,ctrl] | front | pos
+// drive click X Y | drag X1 Y1 X2 Y2 | type TEXT | keys MS TEXT | typeu MS TEXT | hover X Y | key CODE [cmd,shift,opt,ctrl] | front | pos
 import AppKit
 let a = CommandLine.arguments
 let src = CGEventSource(stateID: .hidSystemState)
@@ -40,6 +40,18 @@ case "type":
 case "key":
     let code = CGKeyCode(Int(a[2])!), f = a.count > 3 ? flags(a[3]) : []
     for down in [true, false] { let e = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: down); e?.flags = f; post(e) }
+    // Release the modifiers too, or the HID state keeps them held for later clicks (a later click became a ⌃-click).
+    if !f.isEmpty {
+        for m: CGKeyCode in [55, 56, 58, 59] { let e = CGEvent(keyboardEventSource: src, virtualKey: m, keyDown: false); e?.type = .flagsChanged; e?.flags = []; post(e) }
+    }
+case "typeu":
+    // Unicode text with a delay between characters (IME-free typing into Cocoa text fields).
+    let ms = UInt32(a[2])!
+    for ch in a[3...].joined(separator: " ").utf16 {
+        var c = ch
+        for down in [true, false] { let e = CGEvent(keyboardEventSource: nil, virtualKey: 0x31, keyDown: down); e?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &c); post(e) }
+        usleep(ms * 1000)
+    }
 case "keys":
     // US key codes with a delay between keys, for apps that ignore Unicode-string events (Terminal).
     let codes: [Character: CGKeyCode] = ["a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9, "b": 11, "q": 12,

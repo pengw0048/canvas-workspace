@@ -44,6 +44,10 @@ extension CanvasView {
         let wp = camera.toWorld(vp)
         notePointer(wp)
         if followUser != nil { stopFollowing() }
+        if let o = ws.live.first(where: { $0.kind == .browser && renderer.addressBarRect($0.id)?.contains(vp) == true }) {
+            editAddress(o.id)
+            return
+        }
         if case .region = drag {
             drag = .region(objectID: regionTarget ?? "", start: vp, current: vp)
             return
@@ -478,6 +482,8 @@ extension CanvasView {
         toolbar?.pointerMoved(viewPoint(e), in: bounds)
         let wp = camera.toWorld(viewPoint(e))
         notePointer(wp)
+        let bar = ws.live.first { $0.kind == .browser && renderer.addressBarRect($0.id)?.contains(viewPoint(e)) == true }
+        hoveredID = bar?.id ?? ws.hitTest(wp, zoom: camera.zoom).first?.id
         updateCursor()
     }
 
@@ -638,5 +644,42 @@ extension CanvasView {
     func stopFollowing() {
         followUser = nil
         hud.update()
+    }
+}
+
+extension CanvasView {
+    /// Clicking a page's address bar edits its URL; Return navigates, Escape cancels.
+    func editAddress(_ id: ObjectID) {
+        guard let r = renderer.addressBarRect(id), let o = ws.object(id) else { return }
+        addressField?.removeFromSuperview()
+        let f = AddressField(frame: NSRect(x: r.minX, y: r.minY, width: max(r.width, 420), height: r.height))
+        f.stringValue = o.props.url ?? ""
+        f.font = .systemFont(ofSize: 12)
+        f.bezelStyle = .roundedBezel
+        f.focusRingType = .none
+        f.onCommit = { [weak self, weak f] text in
+            f?.removeFromSuperview()
+            self?.addressField = nil
+            self?.window?.makeFirstResponder(self)
+            guard let text else { return }
+            let t = text.trimmingCharacters(in: .whitespaces)
+            guard let u = URL(string: t.contains("://") ? t : "https://" + t) else { return }
+            self?.app.browsers.navigate(id, to: u)
+        }
+        addSubview(f)
+        window?.makeFirstResponder(f)
+        f.currentEditor()?.selectAll(nil)
+        addressField = f
+    }
+}
+
+final class AddressField: NSTextField, NSTextFieldDelegate {
+    var onCommit: ((String?) -> Void)?
+    override init(frame: NSRect) { super.init(frame: frame); delegate = self }
+    required init?(coder: NSCoder) { fatalError() }
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
+        if sel == #selector(NSResponder.insertNewline(_:)) { onCommit?(stringValue); return true }
+        if sel == #selector(NSResponder.cancelOperation(_:)) { onCommit?(nil); return true }
+        return false
     }
 }

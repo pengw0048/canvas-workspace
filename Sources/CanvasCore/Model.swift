@@ -151,13 +151,15 @@ public struct ObjectProps: Codable, Equatable, Sendable {
     public var liveOf: ObjectID?
     public var fileName: String?
     public var locked: Bool?
+    /// Display name of the person who created the object, shown faintly on notes.
+    public var authorName: String?
 
     public init() {}
 
     static let keys: [String] = [
         "color", "fill", "strokeWidth", "fontSize", "shape", "inkPoints", "inkTool", "assetID",
         "captureID", "name", "sourceID", "start", "end", "appBundleID", "appName", "windowTitle",
-        "logicalSize", "previewAssetID", "previewTime", "url", "browserMode", "liveOf", "fileName", "locked",
+        "logicalSize", "previewAssetID", "previewTime", "url", "browserMode", "liveOf", "fileName", "locked", "authorName",
     ]
 
     /// JSON-encoded value per non-nil key.

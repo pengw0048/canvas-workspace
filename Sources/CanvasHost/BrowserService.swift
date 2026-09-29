@@ -80,6 +80,12 @@ final class BrowserService: NSObject, WKNavigationDelegate {
         return v
     }
 
+    /// Loads a new address in a page surface; the URL becomes part of its source state.
+    func navigate(_ id: ObjectID, to u: URL) {
+        try? ws.perform("Navigate") { $0.update(id) { $0.props.url = u.absoluteString } }
+        webView(for: id)?.load(URLRequest(url: u))
+    }
+
     func id(of v: WKWebView) -> ObjectID? { views.first { $0.value === v }?.key }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

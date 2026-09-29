@@ -1,0 +1,23 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>花见小路 · 京町家民宿</title><style>
+body{font:17px -apple-system,"PingFang SC";margin:0;background:#faf7f2;color:#2b2b2b}
+.hero{height:210px;background:linear-gradient(135deg,#c0392b 0%,#e67e22 55%,#f5d6a0 100%);color:#fff;padding:34px 44px;box-sizing:border-box}
+.hero h1{margin:0;font-size:36px}.hero p{margin:8px 0 0;opacity:.9}
+main{padding:26px 44px}.row{display:flex;gap:16px;margin:14px 0}
+label{display:block;font-size:14px;color:#777;margin-bottom:6px}
+input{font:18px -apple-system;padding:10px 12px;border:1px solid #ddd;border-radius:10px;width:200px;background:#fff}
+button{font:18px -apple-system,"PingFang SC";background:#c0392b;color:#fff;border:0;border-radius:12px;padding:14px 34px;margin-top:10px;cursor:pointer}
+.price{font-size:15px;color:#777}#ok{display:none;background:#fff;border-radius:16px;padding:26px 30px;box-shadow:0 4px 18px rgba(0,0,0,.08)}
+#ok h2{margin:0 0 8px;color:#2e8b57}
+</style></head><body>
+<div class="hero"><h1>花见小路 · 京町家民宿</h1><p>京都 · 祇园 · 步行 3 分钟到八坂神社</p></div>
+<main><div id="form">
+<div class="row"><div><label>入住</label><input id="in" value="2026-04-12"></div><div><label>退房</label><input id="out" value="2026-04-15"></div><div><label>人数</label><input id="n" value="3"></div></div>
+<p class="price">每晚 ¥1,100 · 含早餐</p><button id="book">预订</button></div>
+<div id="ok"><h2>预订成功 ✓</h2><div id="sum"></div><p class="price">订单号 KY-0412-3 · 可免费取消至 4月5日</p></div>
+</main><script>
+document.getElementById('book').onclick=function(){
+ var a=document.getElementById('in').value,b=document.getElementById('out').value,n=document.getElementById('n').value;
+ var nights=Math.round((new Date(b)-new Date(a))/864e5);
+ document.getElementById('sum').textContent=a+' 入住 · '+b+' 退房 · '+nights+' 晚 · '+n+' 人';
+ document.getElementById('form').style.display='none';document.getElementById('ok').style.display='block';};
+</script></body></html>

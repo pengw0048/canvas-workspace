@@ -142,6 +142,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             newSession = try WorkspaceSession(directory: dir, user: identity.id)
+            newSession.workspace.userName = identity.name
         } catch { fail(error, dir); return false }
         if session != nil {
             workspace.flush()
@@ -637,6 +638,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             m.addItem(.separator())
             item(m, "Cut", #selector(NSText.cut(_:)), "x")
             item(m, "Copy", #selector(NSText.copy(_:)), "c")
+            item(m, "Copy as Image", #selector(CanvasView.copyAsImage(_:)), "c", [.command, .option])
             item(m, "Paste", #selector(NSText.paste(_:)), "v")
             item(m, "Duplicate", #selector(CanvasView.duplicate(_:)), "d")
             item(m, "Delete", #selector(NSText.delete(_:)), "")

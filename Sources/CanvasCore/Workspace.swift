@@ -53,6 +53,7 @@ public final class Transaction {
     public func create(_ o: CanvasObject) {
         var o = o
         if o.author.isEmpty { o.author = ws.user }
+        if o.props.authorName == nil, o.author == ws.user { o.props.authorName = ws.userName }
         if original[o.id] == nil { original[o.id] = .some(nil); order.append(o.id) }
         working[o.id] = o
     }
@@ -70,6 +71,8 @@ public final class Workspace {
     public private(set) var scopes: [ScopeID: ScopeDocument] = [:]
     public private(set) var objects: [ObjectID: CanvasObject] = [:]
     public var user: String
+    /// This person's display name, recorded on the objects they create.
+    public var userName: String?
     public weak var persistence: WorkspacePersistence?
 
     public private(set) var saveState: SaveState = .saved(Date())

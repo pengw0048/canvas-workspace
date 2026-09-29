@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Cuts a director take into a shareable clip: scripts/demo/export.sh <work-dir> <out.mp4>
-# Drops the pre-roll, the gap between quitting and resuming (the desktop shows other windows then),
+# Drops the pre-roll, the gap between quitting and resuming (when the take relaunches) (the desktop shows other windows then),
 # and single-frame flashes where the recorder composited the desktop through the canvas.
 set -eu
 W=$1; OUT=$2
@@ -9,7 +9,9 @@ import re, subprocess, sys
 w, out = sys.argv[1], sys.argv[2]
 mov = f"{w}/demo.mov"
 marks = dict(l.split() for l in open(f"{w}/marks"))
-s, q, r, e = (float(marks[k]) for k in ("start", "quit", "resumed", "end"))
+s, e = float(marks["start"]), float(marks["end"])
+# Takes without a relaunch have no quit/resumed marks.
+q, r = (float(marks["quit"]), float(marks["resumed"])) if "quit" in marks else (e - 0.4, None)
 
 def scene_changes():
     log = subprocess.run(["ffmpeg", "-v", "error", "-i", mov, "-vf", "scale=320:-1,select='gt(scene,0.08)',metadata=print:file=-",
@@ -31,7 +33,7 @@ for t in scene_changes() + [1e9]:
             cuts.append((a, b))
         burst = []
     burst.append(t)
-cuts = [c for c in cuts if s < c[0] < q or r < c[0] < e]
+cuts = [c for c in cuts if s < c[0] < q or (r is not None and r < c[0] < e)]
 print("flashes removed at:", ", ".join(f"{a:.2f}s" for a, _ in cuts) or "none")
 
 def pieces(lo, hi):
@@ -42,16 +44,19 @@ def pieces(lo, hi):
     return out + [(cur, hi)]
 
 segs = pieces(s, q + 0.4)
-tail = pieces(r, e)
+tail = pieces(r, e) if r is not None else []
 f, labels = [], []
 for i, (a, b) in enumerate(segs + tail):
     f.append(f"[0:v]trim={a}:{b},setpts=PTS-STARTPTS,fps=60,format=yuv420p[p{i}]")
     labels.append(f"[p{i}]")
 n1 = len(segs)
-f.append("".join(labels[:n1]) + f"concat=n={n1}:v=1[a]")
-f.append("".join(labels[n1:]) + f"concat=n={len(tail)}:v=1[b]")
-dur_a = sum(b - a for a, b in segs)
-f.append(f"[a][b]xfade=transition=fade:duration=0.4:offset={dur_a - 0.4}[v]")
+if tail:
+    f.append("".join(labels[:n1]) + f"concat=n={n1}:v=1[a]")
+    f.append("".join(labels[n1:]) + f"concat=n={len(tail)}:v=1[b]")
+    dur_a = sum(b - a for a, b in segs)
+    f.append(f"[a][b]xfade=transition=fade:duration=0.4:offset={dur_a - 0.4}[v]")
+else:
+    f.append("".join(labels) + f"concat=n={n1}:v=1[v]")
 subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", mov, "-filter_complex", ";".join(f), "-map", "[v]",
                 "-c:v", "libx264", "-crf", "18", "-preset", "slow", "-movflags", "+faststart", out], check=True)
 print("wrote", out)

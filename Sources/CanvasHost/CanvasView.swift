@@ -117,6 +117,7 @@ final class CanvasView: NSView, SceneContext {
     var remoteCursors: [String: (name: String, point: WPoint, color: NSColor, selection: [ObjectID], chat: String?)] = [:]
     var chatText: String?
     var chatField: NSTextField?
+    var addressField: NSTextField?
     var chatClear: Timer?
     var followUser: String?
     var regionTarget: ObjectID?
@@ -186,6 +187,12 @@ final class CanvasView: NSView, SceneContext {
     func icon(for o: CanvasObject) -> NSImage? { app.runtime.icon(for: o) }
     func status(for o: CanvasObject) -> SurfaceStatus? { app.runtime.status(for: o) }
     var editingID: ObjectID? { editor?.objectID }
+    var hoveredID: ObjectID? {
+        didSet {
+            guard hoveredID != oldValue else { return }
+            for id in [oldValue, hoveredID].compactMap({ $0 }) where ws.object(id)?.kind == .browser { renderer.refreshSurface(id, ws) }
+        }
+    }
     func isSelected(_ id: ObjectID) -> Bool { selection.contains(id) }
     var presenting: Bool { app.presenting }
     var activeID: ObjectID? { app.runtime.activeObject }
@@ -568,7 +575,9 @@ final class CanvasView: NSView, SceneContext {
         presenceLayer.sublayers?.forEach { $0.removeFromSuperlayer() }
         // A participant shown picture-in-picture for a recording also draws its own automated pointer.
         if CommandLine.arguments.contains("--pip"), let lp = lastPointerWorld {
-            drawCursor(at: camera.toView(lp), name: nil, color: app.collab?.myColor ?? .systemPink, chat: chatText)
+            // Stands in for this participant's own system pointer, which a recording cannot show.
+            drawSystemArrow(at: camera.toView(lp))
+            drawCursor(at: camera.toView(lp), name: nil, color: app.collab?.myColor ?? .systemPink, chat: chatText, arrow: false)
         } else if chatField == nil, let t = chatText, !t.isEmpty, let lp = lastPointerWorld {
             // A sent message stays beside the real pointer while collaborators still see it.
             drawCursor(at: camera.toView(lp), name: nil, color: app.collab?.myColor ?? .systemPink, chat: t, arrow: false)
@@ -590,10 +599,10 @@ final class CanvasView: NSView, SceneContext {
 
     // MARK: Capture flight
 
-    /// Brackets lock onto the captured region, a scan line sweeps it and it flashes; then the image flies to its object.
-    func flyCapture(_ img: CGImage, from src: WRect, to id: ObjectID) {
-        guard let o = ws.object(id), let root = layer, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        let from = camera.toView(src), to = camera.toView(o.geom.rect)
+    /// Brackets lock onto a region, a scan line sweeps it and it flashes: pixels were taken or copied.
+    @discardableResult
+    func scanEffect(_ from: CGRect) -> CALayer? {
+        guard let root = layer, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return nil }
         let accent = NSColor(calibratedRed: 0.22, green: 0.89, blue: 1, alpha: 1).cgColor
         let now = CACurrentMediaTime()
         func animate(_ l: CALayer, _ key: String, _ a: Any, _ b: Any, at t: Double, for d: Double) {
@@ -652,6 +661,21 @@ final class CanvasView: NSView, SceneContext {
         fx.addSublayer(flash)
         animate(flash, "opacity", 0.9, 0, at: 0.42, for: 0.3)
         animate(brackets, "opacity", 1, 0, at: 0.5, for: 0.25)
+        return fx
+    }
+
+    /// The scan effect over what was just copied.
+    func copyEffect(_ ids: [ObjectID]) {
+        guard let b = WRect.union(ids.compactMap { ws.object($0)?.geom.bounds }), let fx = scanEffect(camera.toView(b.insetBy(-10))) else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { fx.removeFromSuperlayer() }
+    }
+
+    /// The scan effect on the captured region, then the image flies to its new object.
+    func flyCapture(_ img: CGImage, from src: WRect, to id: ObjectID) {
+        guard let o = ws.object(id), let root = layer, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let from = camera.toView(src), to = camera.toView(o.geom.rect)
+        guard let fx = scanEffect(from) else { return }
+        let accent = NSColor(calibratedRed: 0.22, green: 0.89, blue: 1, alpha: 1).cgColor
         renderer.layers[id]?.opacity = 0
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
             let chip = CALayer()

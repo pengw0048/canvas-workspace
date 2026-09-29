@@ -80,6 +80,25 @@ extension CanvasView: NSTextFieldDelegate {
         }
     }
 
+    /// The standard macOS arrow: black with a white outline.
+    func drawSystemArrow(at p: CGPoint) {
+        let a = CAShapeLayer()
+        let path = CGMutablePath()
+        let pts: [(CGFloat, CGFloat)] = [(0, 0), (0, 17), (4, 13), (7, 20), (9.5, 19), (6.5, 12.5), (12, 12.5)]
+        path.addLines(between: pts.map { CGPoint(x: p.x + $0.0, y: p.y + $0.1) })
+        path.closeSubpath()
+        a.path = path
+        a.fillColor = NSColor.black.cgColor
+        a.strokeColor = NSColor.white.cgColor
+        a.lineWidth = 1.2
+        a.lineJoin = .round
+        a.shadowColor = NSColor.black.cgColor
+        a.shadowOpacity = 0.3
+        a.shadowRadius = 1.5
+        a.shadowOffset = CGSize(width: 0, height: 1)
+        presenceLayer.addSublayer(a)
+    }
+
     /// A cursor arrow plus a name pill; with chat text the pill grows into a speech bubble.
     /// Your own cursor passes no name: you never see your own name.
     func drawCursor(at p: CGPoint, name: String?, color: NSColor, chat: String?, arrow drawArrow: Bool = true) {

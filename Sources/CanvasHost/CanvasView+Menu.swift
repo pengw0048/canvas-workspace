@@ -234,6 +234,7 @@ extension CanvasView: NSMenuItemValidation {
     // MARK: Responder chain edit actions
 
     @objc func copy(_ sender: Any?) { app.pasteboard.copy(ids: selectedIDs, mode: .standard) }
+    @objc func copyAsImage(_ sender: Any?) { app.pasteboard.copy(ids: selectedIDs, mode: .image) }
     @objc func cut(_ sender: Any?) {
         app.pasteboard.copy(ids: selectedIDs, mode: .standard)
         removeSelection()

@@ -196,6 +196,7 @@ final class PasteboardService: NSObject {
             case .link: what = "Copied link"
             }
             app.activeCanvas?.hud.flash(what, seconds: 1.2)
+            app.activeCanvas?.copyEffect(ids)
         } catch {
             app.activeCanvas?.hud.flash("Copy failed: \(error)", seconds: 4)
         }

@@ -144,12 +144,26 @@ final class Collaboration: NSObject {
     var presence: [String: Presence] = [:]
     var myColor = NSColor.systemPink
 
+    static let palette: [NSColor] = [0xE5484D, 0x8E4EC6, 0x12A594, 0x3E63DD, 0xF76B15, 0xD6409F, 0x0090FF, 0x46A758].map {
+        NSColor(srgbRed: CGFloat($0 >> 16 & 0xFF) / 255, green: CGFloat($0 >> 8 & 0xFF) / 255, blue: CGFloat($0 & 0xFF) / 255, alpha: 1)
+    }
+
     /// A fixed sRGB color per person, the same in every process and on every launch.
     static func color(for userID: String) -> NSColor {
-        let palette: [UInt32] = [0xE5484D, 0x8E4EC6, 0x12A594, 0x3E63DD, 0xF76B15, 0xD6409F, 0x0090FF, 0x46A758]
         let h = userID.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }
-        let c = palette[Int(h % UInt32(palette.count))]
-        return NSColor(srgbRed: CGFloat(c >> 16 & 0xFF) / 255, green: CGFloat(c >> 8 & 0xFF) / 255, blue: CGFloat(c & 0xFF) / 255, alpha: 1)
+        return palette[Int(h % UInt32(palette.count))]
+    }
+
+    /// When someone already present has the same color, the person with the larger ID moves to the next free color.
+    func resolveColorClash() {
+        let hex = { (c: NSColor) in c.usingColorSpace(.sRGB).map { "\(Int($0.redComponent * 255)),\(Int($0.greenComponent * 255)),\(Int($0.blueComponent * 255))" } ?? "" }
+        let others = presence.values.filter { $0.userID != me }
+        guard others.contains(where: { hex($0.color) == hex(myColor) && $0.userID < me }) else { return }
+        let used = Set(others.map { hex($0.color) })
+        guard let free = Self.palette.first(where: { !used.contains(hex($0)) }) else { return }
+        myColor = free
+        lastPresenceSent = .distantPast
+        if let c = app.activeCanvas { publishPresence(from: c) }
     }
     var panel: CollaborationPanel?
     var presenceTimer: Timer?
@@ -1142,6 +1156,7 @@ final class Collaboration: NSObject {
                           camera: camParts.count >= 3 ? (camParts[0], camParts[1], camParts[2]) : nil, claims: claims, seen: Date(),
                           chat: m["chat"].flatMap { $0.isEmpty ? nil : String($0.prefix(280)) })
         presence[u] = pr
+        resolveColorClash()
         for c in app.canvases {
             if let p = pr.pointer { c.remoteCursors[u] = (pr.name, p, pr.color, pr.selection, pr.chat) }
             if c.followUser == u, let cam = pr.camera {
