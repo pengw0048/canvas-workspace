@@ -64,7 +64,7 @@ exercised end to end. **Simulated** — exercised, but with a stand-in noted in 
 | First activation click consumed by host; zoom never grants input | Verified | The first click selected the surface; only the double-click activated it; TextEdit content was untouched. |
 | App menus reflect the active app | Verified | Menu bar showed TextEdit's menus while active. |
 | Dialogs, sheets, palettes of the active app | Verified (Save As sheet, RTFD conversion alert) | Palettes not tested. |
-| IME input | Verified (canvas note: marked text and candidate window) / Unverified (commit re-check, active app) | Japanese romaji input showed marked text and candidates in a canvas note. Committing exposed an editor re-entrancy crash (stack overflow, duplicated text); fixed and covered by an automation check (`typeinto`); a real IME commit must be re-run. |
+| IME input | Verified (canvas note) / Unverified (active app) | Japanese romaji input showed marked text and candidates and committed once. The first run exposed an editor re-entrancy crash (stack overflow, duplicated text); fixed and re-run with the real IME. |
 | A second unrelated application | Verified | Preview window admitted and activated at 1:1; Finder window admitted and used as a drop target. |
 | Surviving runtime reconnect after host restart (pid + window number + bundle; document check) | Verified | Host killed and relaunched; TextEdit window rebound, no duplicate. |
 | Reopen source by document path when the window is gone | Unverified | Document path comes from `AXDocument`; it now follows app-side renames while connected (found when TextEdit converted `.rtf` to `.rtfd`). |
@@ -90,7 +90,7 @@ exercised end to end. **Simulated** — exercised, but with a stand-in noted in 
 | Paste composition into a real document app | Verified | Real ⌘C on the canvas, real ⌘V in TextEdit; saved `deliverable.rtfd` contains the annotated capture (evidence). |
 | Native drag out through the export grip | Verified (text into TextEdit, PNG file promise into Finder) | Hovering over the app surface for 0.5 s brought the real window there; the note text landed in report.txt, and a valid 821×343 PNG appeared in the Finder folder. |
 | Canceled drag | Verified | Escape during a content drag left the document and canvas unchanged. |
-| Drag in | Verified (file from Finder) / Unverified (images, text, URLs, promises) | Dropping sample.png from Finder created a file reference; the file stayed in its folder. |
+| Drag in | Verified (file from Finder) / Unverified (text, images, URLs, promises) | Dropping sample.png from Finder created a file reference; the file stayed in its folder. A text drag from TextEdit did not start in the automated run (selection setup), so text drag-in remains unverified. |
 | Frozen capture never changes; live view follows its source; freeze creates a new capture | Verified (frozen/live coexist) | The fixture app did not reload the edited file, so live updates were seen as new frames only. |
 
 ## Lifecycle and recovery (package D)
@@ -119,7 +119,7 @@ and identities on the same Mac, connected over loopback TLS-PSK. **Simulated:** 
 | Presence, cursors, remote selection outlines, follow mode, movement claims | Verified (presence, cursor and dashed selection outline, follow) / Unverified (claims) | Bob's camera followed Alice's; banner offered Stop following. |
 | Revoke member → future access denied, member keeps a private recovered copy | Verified | Bob's shared scope was removed, its 12 objects kept as private copies; rejoining with the code and joining with a wrong code were both refused. |
 | Shared browser runtime: single controller, generation tokens, stale/replayed events rejected, reclaim | Verified | Controller click incremented the page counter; generation 0 and post-reclaim generation 1 events rejected. Grant was issued through automation instead of the host's dialog. |
-| Shared native app: grant, target verification, local takeover reclaim, stale grants | Verified (grant, reclaim on local use, stale generations rejected) / Unverified (typed text, live frames) | Bob (second process) received generation 1 and 3; each time a real local click by the host in TextEdit revoked the grant (generation 2, 4) and Bob's later events were rejected. Bob's text did not arrive because target verification treated the full-screen Dock window as topmost and paused input; fixed, needs a re-run. |
+| Shared native app: live frames, grant, remote input, local takeover reclaim, stale grants | Verified | Bob (second process) saw TextEdit live ("Live from host"), clicked and typed into the host's real TextEdit document, and lost control whenever the host used the app locally; his later and replayed events were rejected. A Dock-layer target-check bug found on the way was fixed. When the host quit, Bob kept the last published frame with "Host offline". |
 | Explicit transfers: controller text/file into the remote app, copy from the remote app | Unverified | Host restores its own clipboard afterwards unless it changed meanwhile. |
 | Reference page mode (per-user rendering, captures) | Verified (page load and preview) | |
 | Provider-collaborative document mode | Unverified | Opens the link in the user's own browser; no credentials copied. |
@@ -148,8 +148,7 @@ used 825 MB.
 
 ## Next steps
 
-1. In a notified input window: re-run the IME commit and the remote typed text after the fixes;
-   drag in images, text, and URLs.
-2. Live frames to a member during shared native control (E2E-09).
+1. In a notified input window: drag in text, images, and URLs; IME in an active app.
+2. Explicit remote transfers (controller text/file into the remote app, copy from it).
 3. Performance with three live surfaces and two participants.
 4. Workspace history preview (§8.5), multiple workspaces.

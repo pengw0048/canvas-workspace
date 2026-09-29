@@ -345,3 +345,21 @@ final class Pair {
     try ws.undo()
     #expect(ws.object(n.id)?.geom.x == 500 && ws.object(later.id) != nil)
 }
+
+@Test func controlArbiterRejectsStaleAndReplayedInput() {
+    var a = ControlArbiter(startingAt: 100)
+    let (g1, _) = a.grant(to: "bob")
+    var down = RemoteInputEvent(kind: .down)
+    #expect(a.check(from: "bob", generation: g1, seq: 1, event: down) == .accept)
+    #expect(a.check(from: "bob", generation: g1, seq: 1, event: down) != .accept)      // replay
+    #expect(a.check(from: "carol", generation: g1, seq: 2, event: down) != .accept)    // not controller
+    let released = a.revoke()
+    #expect(released.mouse)                                                          // held button released
+    #expect(a.check(from: "bob", generation: g1, seq: 3, event: down) != .accept)      // revoked grant
+    let (g2, _) = a.grant(to: "bob")
+    #expect(g2 != g1)
+    a.pause("covered")
+    down.kind = .move
+    #expect(a.check(from: "bob", generation: g2, seq: 1, event: down) != .accept)      // paused target
+    #expect(a.check(from: "bob", generation: g2, seq: 2, event: RemoteInputEvent(kind: .up)) == .accept)
+}

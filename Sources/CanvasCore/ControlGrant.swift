@@ -27,7 +27,8 @@ public struct ControlArbiter: Sendable {
     public private(set) var mouseDown = false
     public private(set) var paused: String?
 
-    public init() {}
+    /// Generations start from the session clock so grants from an earlier host session never match.
+    public init(startingAt g: UInt64 = UInt64(Date().timeIntervalSince1970 * 1000)) { generation = g }
 
     public enum Verdict: Equatable, Sendable {
         case accept
