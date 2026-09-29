@@ -13,6 +13,8 @@ panel.backgroundColor = .clear
 panel.ignoresMouseEvents = true
 panel.hasShadow = true
 panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+// Kept out of screenshots and recordings, so demo captures stay clean.
+panel.sharingType = .none
 let bg = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
 bg.material = .hudWindow
 bg.state = .active

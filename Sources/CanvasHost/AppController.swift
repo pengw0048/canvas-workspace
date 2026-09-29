@@ -47,6 +47,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// connected window surface live.
     func presentationChanged() {
         NSApp.mainMenu?.items.first { $0.title == "Debug" }?.isHidden = presenting
+        if !windowed {
+            NSApp.presentationOptions = presenting ? [.autoHideMenuBar, .autoHideDock] : [.autoHideMenuBar]
+            // With the Dock hidden too, the canvas covers the whole display.
+            for w in windows {
+                guard let screen = w.screen ?? NSScreen.main else { continue }
+                let v = screen.visibleFrame
+                w.setFrame(presenting ? screen.frame : NSRect(x: v.minX, y: v.minY, width: v.width, height: screen.frame.maxY - v.minY), display: true)
+            }
+        }
         for c in canvases {
             c.hud.update()
             c.toolbar?.setAutoHide(presenting)
@@ -277,7 +286,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             windows.append(w)
             canvases.append(cv)
             // `--background` keeps development runs behind the user's windows without taking focus.
-            if CommandLine.arguments.contains("--background") { w.orderBack(nil) } else { w.makeKeyAndOrderFront(nil) }
+            // `--hidden` runs a participant with no visible window (for recordings).
+            if CommandLine.arguments.contains("--hidden") { w.orderOut(nil) }
+            else if CommandLine.arguments.contains("--background") { w.orderBack(nil) } else { w.makeKeyAndOrderFront(nil) }
             w.makeFirstResponder(cv)
         }
     }

@@ -28,12 +28,12 @@ Q=$(h 'create {"kind":"sticky","x":-1000,"y":150,"w":230,"h":170,"text":"Is the 
 h 'create {"kind":"text","x":1250,"y":-520,"w":700,"h":60,"text":"Launch review","props":{"fontSize":40}}' >/dev/null
 SC=$(h share $FR_E DEMO-CODE-2026 | python3 -c "import json,sys; print(json.load(sys.stdin)['scope'])"); sleep 1.5
 PORT=$(h port $SC | python3 -c "import json,sys; print(json.load(sys.stdin)['port'])")
-CANVAS_USER_NAME=Maya CANVAS_PASTEBOARD=cw-demo CANVAS_DATA_DIR=$W $root/.build/debug/CanvasWorkspace --windowed --automation --background --profile maya > $W/maya.log 2>&1 &
+CANVAS_USER_NAME=Maya CANVAS_PASTEBOARD=cw-demo CANVAS_DATA_DIR=$W $root/.build/debug/CanvasWorkspace --windowed --automation --hidden --profile maya > $W/maya.log 2>&1 &
 until [[ -S $CS ]] && m state 2>/dev/null | grep -q objects; do sleep 0.2; done; m join DEMO-CODE-2026 127.0.0.1:$PORT >/dev/null; sleep 3
 h present on >/dev/null; h focus >/dev/null; h fit >/dev/null; sleep 3
 
 # --- recording ---
-if (( REC > 0 )); then screencapture -v -V $REC -k $W/demo.mov & REC_PID=$!; sleep 1.5; fi
+if (( REC > 0 )); then screencapture -v -V$REC $W/demo.mov & REC_PID=$!; sleep 1.5; fi
 sleep 2.5                                                    # overview
 h fly -1000 -120 0.62 1.8; sleep 2.6                         # research
 h captureto $CHART 0.03 0.14 0.94 0.8 60 -470 >/dev/null; sleep 1.6    # chart → evidence

@@ -54,7 +54,7 @@ final class BrowserService: NSObject, WKNavigationDelegate {
         o.props.url = u.absoluteString
         o.props.browserMode = mode
         o.props.sourceID = s.id
-        o.props.name = u.host ?? u.absoluteString
+        o.props.name = u.isFileURL ? u.deletingPathExtension().lastPathComponent : (u.host ?? u.absoluteString)
         o.props.logicalSize = [1280, 860]
         do {
             let id = try ws.create(o, name: "Add web page")
@@ -85,9 +85,9 @@ final class BrowserService: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard let id = id(of: webView) else { return }
         loadError[id] = nil
-        if let cur = webView.url?.absoluteString, let o = ws.object(id), o.props.url != cur {
+        if let cur = webView.url?.absoluteString, let o = ws.object(id), o.props.url != cur || (webView.title.map { !$0.isEmpty && $0 != o.props.name } ?? false) {
             // The current URL is part of the surface's source state.
-            try? ws.perform("Navigate", recordUndo: false) { $0.update(id) { $0.props.url = cur; $0.props.name = webView.title ?? webView.url?.host } }
+            try? ws.perform("Navigate", recordUndo: false) { $0.update(id) { $0.props.url = cur; $0.props.name = (webView.title?.isEmpty == false ? webView.title : nil) ?? webView.url?.host ?? $0.props.name } }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.refreshSnapshot(id, store: true) }
     }
