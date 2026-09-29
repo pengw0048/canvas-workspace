@@ -105,6 +105,9 @@ final class CanvasView: NSView, SceneContext {
     var remoteCursors: [String: (name: String, point: WPoint, color: NSColor, selection: [ObjectID])] = [:]
     var followUser: String?
     var regionTarget: ObjectID?
+    var springTarget: ObjectID?
+    var springStart = Date.distantFuture
+    var springFired = false
 
     init(app: AppController, frame: NSRect, displayID: String, view: PersonalView?) {
         self.app = app
@@ -307,6 +310,18 @@ final class CanvasView: NSView, SceneContext {
             c.fit(o.geom.bounds, margin: 60, maxZoom: 4)
         }
         setCamera(c, record: false)
+        hud.update()
+    }
+
+    /// Focus view at an exact camera, without animation (used before placing a real window).
+    func enterFocusView(_ id: ObjectID, camera c: Camera) {
+        if focusReturn == nil { focusReturn = camera }
+        focusObject = id
+        cameraAnimation?.invalidate()
+        cameraAnimation = nil
+        camera = c
+        applyCamera()
+        renderer.refreshDetail(ws)
         hud.update()
     }
 

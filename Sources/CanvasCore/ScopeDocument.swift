@@ -78,7 +78,16 @@ public final class ScopeDocument {
         if case .Scalar(.Boolean(let d))? = try? doc.get(obj: m, key: "deleted") { o.deleted = d }
         if case .Scalar(.F64(let c))? = try? doc.get(obj: m, key: "created") { o.created = c }
         o.author = str("author") ?? ""
-        if case .Object(let t, _)? = try? doc.get(obj: m, key: "text") { o.text = (try? doc.text(obj: t)) ?? "" }
+        if case .Object(let t, _)? = try? doc.get(obj: m, key: "text") {
+            o.text = (try? doc.text(obj: t)) ?? ""
+            o.marks = TextMark.normalized(((try? doc.marks(obj: t)) ?? []).compactMap { mk in
+                switch mk.value {
+                case .Boolean(true): return TextMark(name: mk.name, start: Int(mk.start), end: Int(mk.end), value: "true")
+                case .String(let v): return TextMark(name: mk.name, start: Int(mk.start), end: Int(mk.end), value: v)
+                default: return nil
+                }
+            })
+        }
         if case .Object(let p, _)? = try? doc.get(obj: m, key: "props") {
             var fields: [String: String] = [:]
             for k in doc.keys(obj: p) {
@@ -116,6 +125,7 @@ public final class ScopeDocument {
         for (k, v) in o.props.fieldMap() { try doc.put(obj: p, key: k, value: .String(v)) }
         let t = try doc.putObject(obj: m, key: "text", ty: .Text)
         if !o.text.isEmpty { try doc.spliceText(obj: t, start: 0, delete: 0, value: o.text) }
+        for n in Set(o.marks.map(\.name)) { try setMarks(o.id, name: n, desired: o.marks) }
     }
 
     public func set(_ oid: ObjectID, field: Field, to o: CanvasObject) throws {
@@ -164,6 +174,20 @@ public final class ScopeDocument {
         pos = min(pos, doc.length(obj: t))
         let del = min(Int64(delete), Int64(doc.length(obj: t) - pos))
         try doc.spliceText(obj: t, start: pos, delete: del, value: insert.isEmpty ? nil : insert)
+    }
+
+    /// Replaces the formatting of one mark name with `desired` spans.
+    public func setMarks(_ oid: ObjectID, name: String, desired: [TextMark]) throws {
+        let t = try textObject(oid)
+        let len = doc.length(obj: t)
+        guard len > 0 else { return }
+        let expand: ExpandMark = name == "link" ? .none : .after
+        try doc.mark(obj: t, start: 0, end: len, expand: expand, name: name, value: .Null)
+        for m in desired where m.name == name && m.end > m.start {
+            let e = min(UInt64(m.end), len), st = min(UInt64(m.start), e)
+            guard e > st else { continue }
+            try doc.mark(obj: t, start: st, end: e, expand: expand, name: name, value: name == "link" ? .String(m.value) : .Boolean(true))
+        }
     }
 
     /// Maps a scalar offset observed at `baseHeads` to the current text.

@@ -106,14 +106,22 @@ final class Automation {
             case "copy":
                 let mode: CopyMode = ["image": .image, "text": .text, "link": .link][args.first ?? ""] ?? .standard
                 app.pasteboard.copy(ids: Array(c.selection), mode: mode)
-                return json(["types": NSPasteboard.general.types?.map(\.rawValue) ?? []])
+                return json(["types": PasteboardService.board.types?.map(\.rawValue) ?? []])
             case "paste":
                 if args.count == 2, let x = Double(args[0]), let y = Double(args[1]) { c.lastPointerWorld = WPoint(x: x, y: y); c.lastPointerTime = Date() }
                 let before = Set(ws.live.map(\.id))
                 app.pasteboard.paste(into: c)
                 return json(["created": ws.live.map(\.id).filter { !before.contains($0) }])
+            case "pbrtf":
+                guard let d = PasteboardService.board.data(forType: .rtf), let a = NSAttributedString(rtf: d, documentAttributes: nil) else { return json(["error": "no rtf"]) }
+                return json(["marks": RichText.marks(from: a).map { "\($0.name):\($0.start)-\($0.end)" }, "html": PasteboardService.board.data(forType: .html) != nil])
+            case "marks":
+                let sp = arg.split(separator: " ", maxSplits: 1).map(String.init)
+                let ms = try JSONDecoder().decode([TextMark].self, from: Data(sp[1].utf8))
+                try ws.setMarks(sp[0], ms)
+                return json(["marks": ws.object(sp[0])?.marks.map { "\($0.name):\($0.start)-\($0.end)" } ?? []])
             case "pbtypes":
-                return json(["types": NSPasteboard.general.types?.map(\.rawValue) ?? [], "string": NSPasteboard.general.string(forType: .string) ?? ""])
+                return json(["types": PasteboardService.board.types?.map(\.rawValue) ?? [], "string": PasteboardService.board.string(forType: .string) ?? ""])
             case "move":
                 let rp: ObjectID?? = args.count > 3 ? .some(args[3] == "none" ? nil : args[3]) : nil
                 try ws.move([args[0]], dx: Double(args[1]) ?? 0, dy: Double(args[2]) ?? 0, reparent: rp)
@@ -279,6 +287,28 @@ final class Automation {
                 let until = Date().addingTimeInterval(3)
                 while !done && Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
                 return json(["result": result])
+            case "removemember":
+                app.collab?.removeMember(args[0])
+                return json(["ok": true])
+            case "focus":
+                NSApp.activate(ignoringOtherApps: true)
+                c.window?.makeKeyAndOrderFront(nil)
+                return json(["ok": true])
+            case "screen":
+                // World point → global screen point (top-left origin) for input drivers.
+                let vp = c.camera.toView(WPoint(x: Double(args[0]) ?? 0, y: Double(args[1]) ?? 0))
+                let sp = c.window!.convertPoint(toScreen: c.convert(vp, to: nil))
+                return json(["x": sp.x, "y": NativeWindows.primaryHeight - sp.y])
+            case "grip":
+                guard let o = ws.object(args[0]) else { return json(["error": "missing"]) }
+                let g = c.exportGrip(o)
+                let sp = c.window!.convertPoint(toScreen: c.convert(CGPoint(x: g.midX, y: g.midY), to: nil))
+                return json(["x": sp.x, "y": NativeWindows.primaryHeight - sp.y])
+            case "bindwin":
+                // Stands in for the user's choice in the "Several windows could match" dialog.
+                guard let w = NativeWindows.window(UInt32(args[1]) ?? 0) else { return json(["error": "no window"]) }
+                app.runtime.bind(args[0], to: w, verifiedBy: "chosen by you")
+                return json(["bindings": app.runtime.bindings.mapValues { "\($0.pid):\($0.windowID)" }])
             case "identity":
                 return json(["id": app.identity.id, "name": app.identity.name])
             case "flush":

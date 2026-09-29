@@ -273,6 +273,25 @@ public final class Workspace {
         onChange?([id])
     }
 
+    /// Applies formatting spans for the given names, changing only names whose spans differ.
+    public func setMarks(_ id: ObjectID, _ desired: [TextMark], names: [String] = ["bold", "italic", "link"]) throws {
+        guard let before = objects[id], let s = scopes[before.scope] else { throw CanvasError.missingObject(id) }
+        let want = TextMark.normalized(desired)
+        var changed = false
+        for n in names where before.marks.filter({ $0.name == n }) != want.filter({ $0.name == n }) {
+            try s.setMarks(id, name: n, desired: want)
+            changed = true
+        }
+        guard changed else { return }
+        s.commit(Self.commitMessage(name: "Format text", author: user))
+        var after = before
+        after.marks = s.read(id)?.marks ?? want
+        objects[id] = after
+        persist([s.id: s.takeNewChanges()], assets: [])
+        onLocalScopeChange?(s.id)
+        onChange?([id])
+    }
+
     public var canUndo: Bool { !undoStack.isEmpty }
     public var canRedo: Bool { !redoStack.isEmpty }
 

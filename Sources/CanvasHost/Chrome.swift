@@ -169,7 +169,7 @@ final class HUDView: NSView {
             bannerPanel.isHidden = false
             bannerLabel.stringValue = "Following \(app.collab?.name(of: f) ?? "collaborator") — navigate to stop"
             bannerButton.title = "Stop following"
-        } else if canvas.focusReturn != nil {
+        } else if canvas.focusReturn != nil && canvas.app.runtime.activeObject == nil {
             bannerPanel.isHidden = false
             bannerLabel.stringValue = "Focus view — Esc returns to the previous view"
             bannerButton.title = "Return"

@@ -526,9 +526,7 @@ final class SceneRenderer {
         let para = NSMutableParagraphStyle()
         para.alignment = centered ? .center : .left
         para.lineBreakMode = .byWordWrapping
-        t.attributed = NSAttributedString(string: o.text, attributes: [
-            .font: NSFont.systemFont(ofSize: size), .foregroundColor: color, .paragraphStyle: para,
-        ])
+        t.attributed = RichText.attributed(o.text, marks: o.marks, font: .systemFont(ofSize: size), color: color, paragraph: para)
         t.inset = inset
         t.verticallyCentered = centered
         t.frame = frame

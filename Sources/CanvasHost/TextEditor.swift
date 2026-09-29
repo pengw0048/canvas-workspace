@@ -46,8 +46,8 @@ final class TextEditor: NSObject, NSTextViewDelegate {
         baseHeads = canvas.ws.heads(o.scope)
         textView = NSTextView(frame: NSRect(x: 0, y: 0, width: o.geom.w, height: o.geom.h))
         super.init()
-        textView.string = o.text
-        textView.isRichText = false
+        textView.isRichText = o.kind == .text || o.kind == .sticky
+        textView.isAutomaticLinkDetectionEnabled = textView.isRichText
         textView.drawsBackground = false
         textView.allowsUndo = true
         textView.isVerticallyResizable = true
@@ -68,11 +68,33 @@ final class TextEditor: NSObject, NSTextViewDelegate {
         textView.textContainerInset = inset
         textView.textContainer?.lineFragmentPadding = 5
         if o.kind == .shape { textView.alignment = .center }
+        loadAttributed(o)
         container.addSubview(textView)
         canvas.addSubview(container, positioned: .below, relativeTo: canvas.hud)
         reposition()
         canvas.window?.makeFirstResponder(textView)
     }
+
+    func loadAttributed(_ o: CanvasObject) {
+        let font = textView.font ?? .systemFont(ofSize: 18)
+        let color = textView.textColor ?? .labelColor
+        textView.textStorage?.setAttributedString(RichText.attributed(o.text, marks: o.marks, font: font, color: color))
+        textView.typingAttributes = [.font: font, .foregroundColor: color]
+    }
+
+    /// Pushes formatting when the editor's text matches the document text.
+    func commitMarks() {
+        guard textView.isRichText, let o = canvas.ws.object(objectID), o.text == textView.string,
+              let storage = textView.textStorage else { return }
+        let want = RichText.marks(from: storage)
+        if TextMark.normalized(o.marks) != want {
+            do { try canvas.ws.setMarks(objectID, want) } catch { canvas.app.report(error) }
+        }
+    }
+
+    func textViewDidChangeTypingAttributes(_ n: Notification) {}
+
+    func textDidEndEditing(_ n: Notification) { commit() }
 
     /// Frame = projected rect; bounds = logical size, so AppKit scales text to the zoom.
     func reposition() {
@@ -89,6 +111,16 @@ final class TextEditor: NSObject, NSTextViewDelegate {
         container.bounds = NSRect(x: 0, y: 0, width: g.w, height: g.h)
         if o.kind.rotates && g.rotation != 0 { container.frameCenterRotation = -g.rotation * 180 / .pi }
         textView.frame = NSRect(x: 0, y: 0, width: g.w, height: max(g.h, textView.frame.height))
+    }
+
+    func textView(_ tv: NSTextView, shouldChangeTextIn r: NSRange, replacementString s: String?) -> Bool {
+        if s == nil { scheduleCommit() }
+        return true
+    }
+
+    func scheduleCommit() {
+        commitTimer?.invalidate()
+        commitTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in self?.commit() }
     }
 
     func textDidChange(_ notification: Notification) {
@@ -114,7 +146,8 @@ final class TextEditor: NSObject, NSTextViewDelegate {
     func commit() {
         commitTimer?.invalidate()
         let mine = textView.string
-        guard mine != lastCommitted, let o = canvas.ws.object(objectID), !textView.hasMarkedText() else { return }
+        guard !textView.hasMarkedText() else { return }
+        guard mine != lastCommitted, let o = canvas.ws.object(objectID) else { commitMarks(); return }
         let d = lastCommitted.spliceDiff(to: mine)
         let caret = mine.scalarOffset(utf16: textView.selectedRange().location)
         do {
@@ -128,6 +161,7 @@ final class TextEditor: NSObject, NSTextViewDelegate {
             else { basePos = d.start + d.delete; back = d.start + insLen - caret }
         }
         adopt(o.scope, basePosition: basePos, back: back)
+        commitMarks()
     }
 
     /// Takes the merged document text, keeping the caret at the same logical place.
@@ -138,7 +172,7 @@ final class TextEditor: NSObject, NSTextViewDelegate {
         let merged = o.text
         if merged != textView.string {
             let target = max(0, (doc.mapPosition(objectID, baseHeads: baseHeads, position: basePos) ?? basePos) - back)
-            textView.string = merged
+            if textView.isRichText { loadAttributed(o) } else { textView.string = merged }
             let u = merged.utf16Offset(scalar: target)
             textView.setSelectedRange(NSRange(location: min(u, (merged as NSString).length), length: 0))
         }
@@ -152,7 +186,15 @@ final class TextEditor: NSObject, NSTextViewDelegate {
         if o.deleted { canvas.endEditing(); return }
         guard !textView.hasMarkedText() else { return }
         if textView.string != lastCommitted { commit(); return }
-        guard o.text != lastCommitted else { baseHeads = canvas.ws.heads(o.scope); return }
+        guard o.text != lastCommitted else {
+            baseHeads = canvas.ws.heads(o.scope)
+            if textView.isRichText, let st = textView.textStorage, RichText.marks(from: st) != TextMark.normalized(o.marks) {
+                let sel = textView.selectedRange()
+                loadAttributed(o)
+                textView.setSelectedRange(sel)
+            }
+            return
+        }
         adopt(o.scope)
     }
 
@@ -171,6 +213,25 @@ final class TextEditor: NSObject, NSTextViewDelegate {
 }
 
 extension CanvasView {
+    /// Format → Add Link… on the current text selection.
+    @objc func addLink(_ sender: Any?) {
+        guard let ed = editor else { hud.flash("Select text inside a note or text object first"); return }
+        let tv = ed.textView
+        let r = tv.selectedRange()
+        guard r.length > 0 else { hud.flash("Select the text to link"); return }
+        let a = NSAlert()
+        a.messageText = "Add link"
+        let tf = NSTextField(string: "https://")
+        tf.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
+        a.accessoryView = tf
+        a.addButton(withTitle: "Add")
+        a.addButton(withTitle: "Cancel")
+        a.window.initialFirstResponder = tf
+        guard a.runModal() == .alertFirstButtonReturn, let u = URL(string: tf.stringValue), u.scheme != nil else { return }
+        tv.textStorage?.addAttribute(.link, value: u, range: r)
+        ed.scheduleCommit()
+    }
+
     func beginEditing(_ id: ObjectID, creating: Bool = false) {
         endEditing()
         editor = TextEditor(objectID: id, canvas: self)

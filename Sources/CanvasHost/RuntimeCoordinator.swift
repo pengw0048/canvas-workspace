@@ -346,9 +346,7 @@ final class RuntimeCoordinator: NSObject {
         cam.zoom = logicalW / content.w
         cam.center = content.center
         let needMove = NativeWindows.axTrusted && b.ax != nil
-        c.enterFocusView(id, oneToOne: false)
-        c.camera = cam
-        c.applyCamera()
+        c.enterFocusView(id, camera: cam)
         activeObject = id
         activeCanvas = c
         if needMove, let ax = b.ax, let window = c.window {
@@ -375,6 +373,22 @@ final class RuntimeCoordinator: NSObject {
         activeObject = id
         activeCanvas = canvas
         for c in app.canvases { c.hud.update() }
+    }
+
+    /// Brings the real window over its surface without changing the camera (drag spring-loading).
+    func springLoad(_ id: ObjectID, in c: CanvasView) {
+        guard let o = ws.object(id), let b = verifiedBinding(id), let ax = b.ax, let window = c.window,
+              let w = NativeWindows.window(b.windowID) else { return }
+        let r = c.camera.toView(contentRect(of: o))
+        let center = window.convertPoint(toScreen: c.convert(CGPoint(x: r.midX, y: r.midY), to: nil))
+        let g = NativeWindows.primaryHeight - center.y
+        NativeWindows.setOrigin(ax, CGPoint(x: (center.x - w.frame.width / 2).rounded(), y: (g - w.frame.height / 2).rounded()))
+        NativeWindows.raise(ax)
+        NSRunningApplication(processIdentifier: b.pid)?.activate(options: [])
+        activeObject = id
+        activeCanvas = c
+        showReturnPanel(for: id)
+        refreshAll(id)
     }
 
     /// Returns input to the canvas. The application keeps running.
@@ -462,6 +476,16 @@ final class RuntimeCoordinator: NSObject {
             if byID[b.windowID] == nil || NSRunningApplication(processIdentifier: b.pid) == nil {
                 lose(id, reason: "The window closed")
             }
+        }
+        // While connected, the live window is the identity; follow the app's own document renames.
+        for (id, b) in bindings {
+            guard let ax = b.ax, let doc = NativeWindows.documentPath(ax), let o = ws.object(id), var src = source(o), src.documentPath != doc else { continue }
+            src.documentPath = doc
+            src.documentBookmark = try? URL(fileURLWithPath: doc).bookmarkData()
+            src.lastTitle = NativeWindows.title(ax) ?? src.lastTitle
+            app.session.putSource(src)
+            let title = src.lastTitle
+            try? ws.perform("Document renamed", recordUndo: false) { $0.update(id) { $0.props.windowTitle = title } }
         }
         if !admitRules.isEmpty {
             for w in wins where w.onScreen && !knownWindows.contains(w.windowID) {

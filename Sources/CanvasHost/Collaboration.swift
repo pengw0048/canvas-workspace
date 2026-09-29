@@ -536,7 +536,8 @@ final class Collaboration: NSObject {
             for ch in (e.text ?? "").utf16 {
                 var c = ch
                 for down in [true, false] {
-                    let ev = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: down)
+                    // A letter key code makes some apps insert that letter instead of the Unicode string.
+                    let ev = CGEvent(keyboardEventSource: nil, virtualKey: 0x31, keyDown: down)
                     ev?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &c)
                     ev?.postToPid(b.pid)
                 }
@@ -743,6 +744,9 @@ final class Collaboration: NSObject {
         p.onMessage = { [weak self] peer, m in self?.participantReceive(peer, m, info: info) }
         p.onClose = { [weak self] _ in
             guard let self else { return }
+            if self.connecting && info.scopeID == "pending" {
+                self.app.activeCanvas?.hud.flash("Could not join: check the invite code and host address, or the host may have removed your access", seconds: 6)
+            }
             self.connecting = false
             // Losing the host releases any control grant; it is not restored on reconnect.
             self.myGrants.removeAll()
@@ -879,7 +883,7 @@ final class Collaboration: NSObject {
         let a = NSAlert()
         a.messageText = "Access to the shared workspace ended"
         a.informativeText = "\(reason). \(recovered) object(s) you could see, including any unsent edits, were kept as a private recovered copy on your canvas. They are not published anywhere."
-        a.runModal()
+        if let w = app.activeCanvas?.window { a.beginSheetModal(for: w) } else { a.runModal() }
         refreshUI()
     }
 

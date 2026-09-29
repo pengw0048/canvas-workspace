@@ -309,3 +309,20 @@ final class Pair {
     let ids = try ws.paste(sel, topLeft: WPoint(x: 0, y: 500))
     #expect(Set(ids).isDisjoint(with: [file.id, app.id]))
 }
+
+@Test func formattingMarksPersistAndSync() throws {
+    let p = try Pair()
+    var n = CanvasObject(kind: .text, geom: Geometry(x: 0, y: 0, w: 300, h: 40), text: "Bold and link")
+    n.scope = "shared"
+    n.marks = [TextMark(name: "bold", start: 0, end: 4, value: "true")]
+    try p.a.perform("Create") { $0.create(n) }
+    try p.sync()
+    #expect(p.b.object(n.id)?.marks == [TextMark(name: "bold", start: 0, end: 4, value: "true")])
+    try p.b.setMarks(n.id, [TextMark(name: "bold", start: 0, end: 4, value: "true"), TextMark(name: "link", start: 9, end: 13, value: "https://example.com")])
+    try p.sync()
+    #expect(p.a.object(n.id)?.marks.contains(TextMark(name: "link", start: 9, end: 13, value: "https://example.com")) == true)
+    // Text inserted before a span shifts it.
+    try p.a.spliceText(n.id, baseHeads: p.a.heads("shared"), start: 0, delete: 0, insert: "Very ")
+    try p.sync()
+    #expect(p.b.object(n.id)?.marks.first { $0.name == "bold" }?.start == 5)
+}

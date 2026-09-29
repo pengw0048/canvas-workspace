@@ -184,6 +184,29 @@ public struct ObjectProps: Codable, Equatable, Sendable {
     }
 }
 
+/// A formatting span over text, in Unicode scalar offsets. Names: bold, italic, link.
+public struct TextMark: Codable, Equatable, Hashable, Sendable {
+    public var name: String
+    public var start: Int
+    public var end: Int
+    /// "true" for bold/italic, the URL for links.
+    public var value: String
+    public init(name: String, start: Int, end: Int, value: String) {
+        self.name = name; self.start = start; self.end = end; self.value = value
+    }
+
+    /// Merges adjacent or overlapping spans with the same name and value.
+    public static func normalized(_ ms: [TextMark]) -> [TextMark] {
+        var out: [TextMark] = []
+        for m in ms.filter({ $0.end > $0.start }).sorted(by: { ($0.name, $0.value, $0.start) < ($1.name, $1.value, $1.start) }) {
+            if let last = out.last, last.name == m.name, last.value == m.value, m.start <= last.end {
+                out[out.count - 1].end = max(last.end, m.end)
+            } else { out.append(m) }
+        }
+        return out
+    }
+}
+
 public struct CanvasObject: Codable, Equatable, Sendable {
     public var id: ObjectID
     public var kind: ObjectKind
@@ -196,6 +219,7 @@ public struct CanvasObject: Codable, Equatable, Sendable {
     public var deleted: Bool
     public var props: ObjectProps
     public var text: String
+    public var marks: [TextMark] = []
     public var author: String
     public var created: Double
     /// Scope document that holds this object; not stored inside the object.

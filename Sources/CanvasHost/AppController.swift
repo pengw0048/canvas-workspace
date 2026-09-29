@@ -83,7 +83,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             automation = Automation(app: self)
         }
         runtime.startupScan()
-        NSApp.activate(ignoringOtherApps: true)
+        if !CommandLine.arguments.contains("--background") { NSApp.activate(ignoringOtherApps: true) }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -155,7 +155,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             cv.renderer.refreshDetail(workspace)
             windows.append(w)
             canvases.append(cv)
-            w.makeKeyAndOrderFront(nil)
+            // `--background` keeps development runs behind the user's windows without taking focus.
+            if CommandLine.arguments.contains("--background") { w.orderBack(nil) } else { w.makeKeyAndOrderFront(nil) }
             w.makeFirstResponder(cv)
         }
     }
@@ -469,6 +470,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             item(m, "Capture", #selector(CanvasView.captureSelection(_:)), "c", [.command, .shift])
             m.addItem(.separator())
             item(m, "Find…", #selector(showSearch(_:)), "f", target: self)
+        }
+        top("Format") { m in
+            let b = NSMenuItem(title: "Bold", action: #selector(NSFontManager.addFontTrait(_:)), keyEquivalent: "b")
+            b.tag = Int(NSFontTraitMask.boldFontMask.rawValue)
+            b.target = NSFontManager.shared
+            m.addItem(b)
+            let i = NSMenuItem(title: "Italic", action: #selector(NSFontManager.addFontTrait(_:)), keyEquivalent: "i")
+            i.tag = Int(NSFontTraitMask.italicFontMask.rawValue)
+            i.target = NSFontManager.shared
+            m.addItem(i)
+            item(m, "Add Link…", #selector(CanvasView.addLink(_:)), "k")
         }
         top("View") { m in
             item(m, "Zoom In", #selector(CanvasView.zoomIn(_:)), "=")

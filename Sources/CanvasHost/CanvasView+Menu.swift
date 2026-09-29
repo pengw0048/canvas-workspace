@@ -211,7 +211,7 @@ extension CanvasView: NSMenuItemValidation {
         } else {
             p = WPoint(x: vis.center.x - size.w / 2, y: vis.center.y - size.h / 2)
         }
-        let sig = "\(Int(p.x))|\(Int(p.y))|\(NSPasteboard.general.changeCount)"
+        let sig = "\(Int(p.x))|\(Int(p.y))|\(PasteboardService.board.changeCount)"
         if sig == lastPasteSignature { pasteCount += 1 } else { pasteCount = 0; lastPasteSignature = sig }
         let off = Double(pasteCount) * 24 / max(camera.zoom, 0.1)
         return WPoint(x: p.x + off, y: p.y + off)

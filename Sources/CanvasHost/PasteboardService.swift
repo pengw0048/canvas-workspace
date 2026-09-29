@@ -18,6 +18,9 @@ extension NSPasteboard.PasteboardType {
 final class PasteboardService: NSObject {
     unowned let app: AppController
     init(app: AppController) { self.app = app }
+
+    /// The system clipboard; `CANVAS_PASTEBOARD` names a private board for automated runs.
+    static let board: NSPasteboard = ProcessInfo.processInfo.environment["CANVAS_PASTEBOARD"].map { NSPasteboard(name: NSPasteboard.Name($0)) } ?? .general
     var ws: Workspace { app.workspace }
 
     // MARK: Representations
@@ -140,8 +143,14 @@ final class PasteboardService: NSObject {
             if let p = payload(ids), let d = try? JSONEncoder().encode(p) { item.setData(d, forType: .canvasSelection) }
             if onlyText {
                 let t = textRepresentation(objs) ?? ""
-                let attr = NSAttributedString(string: t, attributes: [.font: NSFont.systemFont(ofSize: 14)])
-                if let rtf = attr.rtf(from: NSRange(location: 0, length: attr.length), documentAttributes: [:]) { item.setData(rtf, forType: .rtf) }
+                let attr = NSMutableAttributedString()
+                for (i, o) in objs.sorted(by: { ($0.geom.y, $0.geom.x) < ($1.geom.y, $1.geom.x) }).enumerated() where !o.text.isEmpty {
+                    if i > 0 && attr.length > 0 { attr.append(NSAttributedString(string: "\n\n")) }
+                    attr.append(RichText.attributed(o.text, marks: o.marks, font: .systemFont(ofSize: o.props.fontSize ?? 14), color: .textColor))
+                }
+                let range = NSRange(location: 0, length: attr.length)
+                if let rtf = attr.rtf(from: range, documentAttributes: [:]) { item.setData(rtf, forType: .rtf) }
+                if let html = try? attr.data(from: range, documentAttributes: [.documentType: NSAttributedString.DocumentType.html]) { item.setData(html, forType: .html) }
                 item.setString(t, forType: .string)
             } else if singleImage, let a = objs[0].props.assetID, let d = app.session.store.assetData(a) {
                 item.setData(d, forType: .png)
@@ -175,7 +184,7 @@ final class PasteboardService: NSObject {
         guard !ids.isEmpty else { return }
         do {
             let item = try makeItem(ids, mode: mode)
-            let pb = NSPasteboard.general
+            let pb = PasteboardService.board
             pb.clearContents()
             if !pb.writeObjects([item]) { throw CanvasError.permission("The system clipboard rejected the data") }
             let what: String
@@ -194,7 +203,7 @@ final class PasteboardService: NSObject {
     // MARK: Paste and drop
 
     func paste(into c: CanvasView) {
-        let pb = NSPasteboard.general
+        let pb = PasteboardService.board
         let created = importPasteboard(pb, at: nil, in: c)
         if created.isEmpty { c.hud.flash("The clipboard has nothing the canvas can use") }
     }
@@ -239,6 +248,20 @@ final class PasteboardService: NSObject {
             if let s = pb.string(forType: .URL) ?? pb.string(forType: .string).flatMap({ isWebURL($0) ? $0 : nil }), let u = URL(string: s.trimmingCharacters(in: .whitespacesAndNewlines)), u.scheme?.hasPrefix("http") == true {
                 let p = drop ?? c.pastePoint(size: WRect(x: 0, y: 0, w: 640, h: 450))
                 return [app.browsers.createPage(u, mode: .reference, at: WPoint(x: p.x + 320, y: p.y + 225), in: c)].compactMap { $0 }
+            }
+            if pb.string(forType: .URL) == nil, let rtf = pb.data(forType: .rtf), let attr = NSAttributedString(rtf: rtf, documentAttributes: nil), attr.length > 0,
+               !RichText.marks(from: attr).isEmpty {
+                // Formatted text keeps bold, italic, and links.
+                let s = attr.string
+                let lines = s.split(separator: "\n", omittingEmptySubsequences: false).count
+                let w = min(560.0, max(160, Double(s.count) * 9)), h = max(40.0, Double(lines) * 28 + 12)
+                let tl = drop.map { WPoint(x: $0.x - w / 2, y: $0.y - h / 2) } ?? c.pastePoint(size: WRect(x: 0, y: 0, w: w, h: h))
+                var o = CanvasObject(kind: .text, geom: Geometry(x: tl.x, y: tl.y, w: w, h: h), text: s)
+                o.props.fontSize = 18
+                o.marks = RichText.marks(from: attr)
+                let id = try ws.create(o, name: "Paste text")
+                c.selection = [id]
+                return [id]
             }
             if let s = pb.string(forType: .string), !s.isEmpty {
                 let lines = s.split(separator: "\n", omittingEmptySubsequences: false).count
@@ -349,7 +372,29 @@ extension CanvasView: NSDraggingSource {
         ctx == .outsideApplication ? [.copy, .link] : .copy
     }
 
+    /// Spring-loading: hovering a drag over a connected app surface brings its real window there,
+    /// so the app itself receives the drop.
+    func draggingSession(_ s: NSDraggingSession, movedTo p: NSPoint) {
+        guard let win = window else { return }
+        let vp = convert(win.convertPoint(fromScreen: p), from: nil)
+        let wp = camera.toWorld(vp)
+        let hit = ws.hitTest(wp, zoom: camera.zoom).first { $0.kind == .app && app.runtime.isRunning($0.id) }
+        if hit?.id != springTarget {
+            springTarget = hit?.id
+            springStart = Date()
+            springFired = false
+            if hit != nil { hud.showHint("Hold to drop into \(hit!.title)") } else { hud.showHint(nil) }
+        } else if let id = springTarget, !springFired, Date().timeIntervalSince(springStart) > 0.5 {
+            springFired = true
+            hud.showHint(nil)
+            app.runtime.springLoad(id, in: self)
+        }
+    }
+
     func draggingSession(_ s: NSDraggingSession, endedAt p: NSPoint, operation: NSDragOperation) {
+        springTarget = nil
+        springFired = false
+        hud.showHint(nil)
         if operation == [] { hud.flash("Drag canceled — nothing changed", seconds: 1.5) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 30) { CanvasView.promiseDelegates.removeAll() }
     }
