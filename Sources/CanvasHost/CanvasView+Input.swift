@@ -79,6 +79,13 @@ extension CanvasView {
 
     func pointerDown(_ e: NSEvent, vp: CGPoint, wp: WPoint) {
         // Handles first: they have their own hit targets.
+        if selection.count == 1, let gid = selection.first, ws.object(gid)?.kind == .group, let b = ws.groupBounds(gid) {
+            let pseudo = CanvasObject(kind: .shape, geom: Geometry(x: b.x, y: b.y, w: b.w, h: b.h))
+            for (h, p) in handlePoints(pseudo) where abs(p.x - vp.x) < 7 && abs(p.y - vp.y) < 7 {
+                drag = .groupResize(id: gid, handle: h, start: b, startPoint: wp)
+                return
+            }
+        }
         if selection.count == 1, let id = selection.first, let o = ws.object(id), o.kind != .group, o.kind != .connector {
             if hitGrip(o, vp) {
                 startExportDrag(ids: Array(selection), event: e)
@@ -180,6 +187,12 @@ extension CanvasView {
             updateOverlay()
         case .erase:
             eraseAt(wp)
+        case .groupResize(let gid, let h, let b0, let p0):
+            let pseudo = CanvasObject(kind: .shape, geom: Geometry(x: b0.x, y: b0.y, w: b0.w, h: b0.h))
+            let g = resized(pseudo, pseudo.geom, handle: h, from: p0, to: wp, keepAspect: e.modifierFlags.contains(.shift))
+            renderer.transientGeom = ws.scaledMembers(gid, from: b0, to: g.rect)
+            renderer.syncTransient(ws)
+            updateOverlay()
         case .create:
             updateOverlay()
         case .none:
@@ -296,6 +309,11 @@ extension CanvasView {
                 regionTarget = nil
                 if r.width > 4 && r.height > 4 { app.captureRegion(objectID: id, viewRect: r, in: self) }
                 else { hud.flash("Capture canceled") }
+            case .groupResize(let gid, let h, let b0, let p0):
+                let pseudo = CanvasObject(kind: .shape, geom: Geometry(x: b0.x, y: b0.y, w: b0.w, h: b0.h))
+                let g = resized(pseudo, pseudo.geom, handle: h, from: p0, to: wp, keepAspect: e.modifierFlags.contains(.shift))
+                renderer.transientGeom = [:]
+                try ws.scaleGroup(gid, from: b0, to: g.rect)
             case .erase(let ids):
                 // The whole gesture is one undoable removal of the touched strokes.
                 if !ids.isEmpty { try ws.removeFromCanvas(Array(ids)) }

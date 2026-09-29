@@ -72,6 +72,7 @@ enum DragOp {
     case erase(ids: Set<ObjectID>)
     case connector(start: Endpoint, current: WPoint)
     case region(objectID: ObjectID, start: CGPoint, current: CGPoint)
+    case groupResize(id: ObjectID, handle: Int, start: WRect, startPoint: WPoint)
 }
 
 final class CanvasView: NSView, SceneContext {
@@ -386,6 +387,10 @@ final class CanvasView: NSView, SceneContext {
                 continue
             }
             addRotatedRect(path, o.geom, inset: -2)
+        }
+        if selection.count == 1, let gid = selection.first, ws.object(gid)?.kind == .group, let b = ws.groupBounds(gid) {
+            let pseudo = CanvasObject(kind: .shape, geom: Geometry(x: b.x, y: b.y, w: b.w, h: b.h))
+            for (_, p) in handlePoints(pseudo) { fill.addRect(CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)); path.addRect(CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)) }
         }
         if selection.count == 1, let id = selection.first, let o0 = ws.object(id), o0.kind != .group, o0.kind != .connector {
             let o = renderer.effective(o0)

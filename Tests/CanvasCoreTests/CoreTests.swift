@@ -408,3 +408,18 @@ final class Pair {
     #expect(try WireMessage.decode(&p2).isEmpty)
     partial = Data()
 }
+
+@Test func scalingAGroupScalesMembersAndKeepsAppWindowSize() throws {
+    let s = try WorkspaceSession(directory: tempDir(), user: "a")
+    let ws = s.workspace
+    let n = note(0, 0)
+    var app = CanvasObject(kind: .app, geom: Geometry(x: 200, y: 0, w: 200, h: 100)); app.props.logicalSize = [800, 400]
+    try ws.perform("c") { $0.create(n); $0.create(app) }
+    let g = try #require(try ws.group([n.id, app.id]))
+    try ws.scaleGroup(g, from: WRect(x: 0, y: 0, w: 400, h: 100), to: WRect(x: 0, y: 0, w: 800, h: 200))
+    #expect(ws.object(n.id)?.geom == Geometry(x: 0, y: 0, w: 200, h: 200))
+    #expect(ws.object(app.id)?.geom == Geometry(x: 400, y: 0, w: 400, h: 200))
+    #expect(ws.object(app.id)?.props.logicalSize == [800, 400])
+    try ws.undo()
+    #expect(ws.object(n.id)?.geom.w == 100)
+}

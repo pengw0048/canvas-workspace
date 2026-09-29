@@ -228,6 +228,39 @@ public extension Workspace {
         return g.id
     }
 
+    /// Geometry of group members after scaling the group's bounds from `old` to `new`.
+    /// Application and file members change presentation size only; their windows are untouched.
+    func scaledMembers(_ gid: ObjectID, from old: WRect, to new: WRect) -> [ObjectID: Geometry] {
+        let sx = new.w / max(old.w, 1), sy = new.h / max(old.h, 1)
+        var out: [ObjectID: Geometry] = [:]
+        for id in movingSet([gid]) {
+            guard let o = object(id) else { continue }
+            var g = o.geom
+            g.x = new.x + (g.x - old.x) * sx
+            g.y = new.y + (g.y - old.y) * sy
+            g.w *= sx
+            g.h *= sy
+            out[id] = g
+        }
+        return out
+    }
+
+    func scaleGroup(_ gid: ObjectID, from old: WRect, to new: WRect) throws {
+        let plan = scaledMembers(gid, from: old, to: new)
+        let sx = new.w / max(old.w, 1), sy = new.h / max(old.h, 1)
+        try perform("Scale group") { tx in
+            for (id, g) in plan { tx.update(id) { $0.geom = g } }
+            for id in plan.keys where tx.object(id)?.kind == .connector {
+                tx.update(id) { c in
+                    func sc(_ p: WPoint?) -> WPoint? { p.map { WPoint(x: new.x + ($0.x - old.x) * sx, y: new.y + ($0.y - old.y) * sy) } }
+                    let sp = c.props.start?.point, ep = c.props.end?.point
+                    if c.props.start?.objectID == nil { c.props.start?.point = sc(sp) }
+                    if c.props.end?.objectID == nil { c.props.end?.point = sc(ep) }
+                }
+            }
+        }
+    }
+
     func ungroup(_ gid: ObjectID) throws {
         let members = groupMembers(gid)
         try perform("Ungroup") { tx in

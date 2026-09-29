@@ -40,7 +40,7 @@ exercised end to end. **Simulated** — exercised, but with a stand-in noted in 
 | Rotation for native objects; app/file previews stay upright | Verified (rendering) | |
 | Stable identities, fractional stacking, bring forward/back, select behind | Verified (unit) / Unverified (UI) | |
 | Frames on the same plane; move carries descendants; resize changes boundary only; acyclic membership | Verified (unit) | Drop reparent preview and publication prompt not exercised by pointer. |
-| Groups, align, distribute, tidy with preview (one undoable command) | Unverified | Core commands exist; tidy preview uses a modal confirmation. |
+| Groups, align, distribute, tidy with preview (one undoable command) | Verified (unit: group scaling) / Unverified (UI) | Group handles scale members as one undoable command; application and file members change presentation size only. Tidy preview uses a modal confirmation. |
 | Connectors track targets; removed endpoint is kept and marked | Verified (unit) | |
 | Per-author undo that does not overwrite later edits by others | Verified (two processes) | Alice's undo reported a conflict and kept Bob's later move. |
 | Durable local autosave, visible save state, failure retry and export | Verified | `fail chunks` → "Not saved…", kill -9, restart shows only confirmed state. |
