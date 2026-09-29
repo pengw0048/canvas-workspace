@@ -323,7 +323,9 @@ final class Collaboration: NSObject {
             guard let code = share.inviteCode else { continue }
             let sid = share.scopeID
             do {
-                let port = share.port ?? (i == 0 ? envPort : nil) ?? 0
+                // Earlier versions stored one device-wide port; the first share keeps it so members reconnect.
+                let legacy = UInt16(app.session.store.meta("listenPort") ?? "")
+                let port = share.port ?? (i == 0 ? (envPort ?? legacy) : nil) ?? 0
                 let l = try NWListener(using: Self.parameters(code: code), on: port == 0 ? .any : NWEndpoint.Port(rawValue: port)!)
                 l.service = NWListener.Service(name: "\(share.title) — \(app.identity.name)", type: "_canvasws._tcp")
                 l.stateUpdateHandler = { [weak self] st in
@@ -450,6 +452,7 @@ final class Collaboration: NSObject {
             hostInput(o, from: u, generation: g, seq: s, event: e, peer: p)
         case "transfer-text", "transfer-file", "copy-from-app":
             guard let o = m["o"], let u = p.userID, let g = UInt64(m["g"] ?? ""), arbiters[o]?.controller == u, arbiters[o]?.generation == g else {
+                Diagnostics.record("transfer", "\(m.type) refused: sender does not hold the current grant")
                 p.send(WireMessage("transfer-result", ["ok": "0", "reason": "You do not currently control this application"]))
                 return
             }
@@ -595,9 +598,10 @@ final class Collaboration: NSObject {
             }
         case .key:
             lastInjection = Date()
+            // The target was verified as frontmost just above; the HID path keeps menu shortcuts working.
             let ev = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(e.keyCode ?? 0), keyDown: e.keyDown ?? true)
             ev?.flags = CGEventFlags(rawValue: e.flags)
-            ev?.postToPid(b.pid)
+            ev?.post(tap: .cghidEventTap)
         case .text:
             lastInjection = Date()
             for ch in (e.text ?? "").utf16 {
@@ -671,10 +675,16 @@ final class Collaboration: NSObject {
             let cc = pb.changeCount
             let err = pasteIntoApp()
             restoreLater(cc)
+            Diagnostics.record("transfer", "text \(text.count) chars: \(err ?? "pasted")")
             p.send(WireMessage("transfer-result", ["ok": err == nil ? "1" : "0", "reason": err ?? "Pasted \(text.count) characters into the application"]))
         case "transfer-file":
             let name = (m["name"] ?? "Transferred file").replacingOccurrences(of: "/", with: "-")
-            let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].appendingPathComponent("Canvas Workspace Transfers", isDirectory: true)
+            // Downloads can be refused by privacy settings; the workspace folder is the fallback.
+            var dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].appendingPathComponent("Canvas Workspace Transfers", isDirectory: true)
+            if (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) == nil {
+                Diagnostics.record("transfer", "Downloads not writable; using the workspace folder")
+                dir = app.dataDir.appendingPathComponent("received", isDirectory: true)
+            }
             do {
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 let dest = dir.appendingPathComponent(name)
@@ -687,8 +697,10 @@ final class Collaboration: NSObject {
                 let cc = pb.changeCount
                 let err = pasteIntoApp()
                 restoreLater(cc)
+                Diagnostics.record("transfer", "file \(m.payload.count) bytes to \(dir.lastPathComponent): \(err ?? "pasted")")
                 p.send(WireMessage("transfer-result", ["ok": "1", "reason": "Delivered \(name) (\(m.payload.count) bytes) to the host" + (err == nil ? " and pasted it into the application" : "; paste failed: \(err!)")]))
             } catch {
+                Diagnostics.record("transfer", "file failed: \(error)")
                 p.send(WireMessage("transfer-result", ["ok": "0", "reason": "File transfer failed: \(error)"]))
             }
         case "copy-from-app":

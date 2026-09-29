@@ -429,6 +429,12 @@ final class Automation {
             case "copyremote":
                 app.collab?.copyFromRemote(args[0])
                 return json(["ok": true])
+            case "closewin":
+                app.runtime.closeWindow(args[0])
+                return json(["ok": true])
+            case "depth":
+                guard let o = ws.object(args[0]) else { return json(["error": "missing"]) }
+                return json(["achieved": app.runtime.achievedDepth[o.id]?.rawValue ?? "", "available": app.runtime.recoveryDepth(o).rawValue])
             case "identity":
                 return json(["id": app.identity.id, "name": app.identity.name])
             case "flush":
