@@ -15,7 +15,7 @@ Requirements: macOS 14 or later, Swift 6 toolchain (Xcode or Command Line Tools)
 
 ```sh
 swift build                    # debug build
-swift test                     # core model, merge, undo, persistence, control-arbitration tests
+scripts/test.sh                # core model, merge, undo, persistence, control-arbitration tests
 scripts/build-app.sh           # release build → dist/CanvasWorkspace.app
 open dist/CanvasWorkspace.app
 ```
