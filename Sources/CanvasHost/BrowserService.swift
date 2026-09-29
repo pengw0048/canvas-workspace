@@ -10,6 +10,10 @@ final class BrowserService: NSObject, WKNavigationDelegate {
     var snapshots: [ObjectID: (CGImage, Date)] = [:]
     var loadError: [ObjectID: String] = [:]
     var activeID: ObjectID?
+    /// Scroll-follow: who a page currently follows, and a scroll waiting for its page to load.
+    var followedBy: [ObjectID: String] = [:]
+    var pendingScroll: [ObjectID: () -> Void] = [:]
+    lazy var scrollReporter = PageScrollReporter(self)
     weak var activeCanvas: CanvasView?
     /// Holds inactive web views so they keep rendering.
     lazy var parking: NSWindow = {
@@ -69,6 +73,8 @@ final class BrowserService: NSObject, WKNavigationDelegate {
         let cfg = WKWebViewConfiguration()
         // Each reference page and shared runtime has its own session; no cookies are copied between people.
         cfg.websiteDataStore = .default()
+        cfg.userContentController.addUserScript(PageScrollReporter.script)
+        cfg.userContentController.add(scrollReporter, name: "canvasScroll")
         let size = o.props.logicalSize ?? [1280, 860]
         let v = WKWebView(frame: NSRect(x: 0, y: 0, width: size[0], height: size[1]), configuration: cfg)
         v.navigationDelegate = self
@@ -90,6 +96,7 @@ final class BrowserService: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard let id = id(of: webView) else { return }
+        pendingScroll.removeValue(forKey: id)?()
         loadError[id] = nil
         if let cur = webView.url?.absoluteString, let o = ws.object(id), o.props.url != cur || (webView.title.map { !$0.isEmpty && $0 != o.props.name } ?? false) {
             // The current URL is part of the surface's source state.
@@ -137,7 +144,11 @@ final class BrowserService: NSObject, WKNavigationDelegate {
     func status(for o: CanvasObject) -> SurfaceStatus? {
         if let e = loadError[o.id] { return SurfaceStatus(text: e, tone: .error) }
         switch o.props.browserMode ?? .reference {
-        case .reference: return SurfaceStatus(text: "Reference page · as rendered for you", tone: .normal)
+        case .reference:
+            if let f = followedBy[o.id], app.canvases.contains(where: { $0.followUser == f }) {
+                return SurfaceStatus(text: "Reference page · following \(app.collab?.name(of: f) ?? "a collaborator")'s scroll", tone: .live)
+            }
+            return SurfaceStatus(text: "Reference page · as rendered for you", tone: .normal)
         case .providerDocument: return SurfaceStatus(text: "Provider document · opens with your own account", tone: .normal)
         case .sharedRuntime:
             if let ctl = app.collab?.controllerLabel(o.id) { return SurfaceStatus(text: "Shared browser runtime · \(ctl)", tone: .live) }

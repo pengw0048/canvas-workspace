@@ -1137,7 +1137,7 @@ final class Collaboration: NSObject {
             guard let o = m["o"], let u = m["from"], let g = UInt64(m["g"] ?? ""), let s = UInt64(m["seq"] ?? ""),
                   let e = try? JSONDecoder().decode(RemoteInputEvent.self, from: m.payload) else { return }
             hostInput(o, from: u, generation: g, seq: s, event: e, peer: p)
-        case "control-granted", "control-denied", "control-state", "control-revoked", "input-rejected":
+        case "control-granted", "control-denied", "control-state", "control-revoked", "input-rejected", "page-follow":
             clientControl(m)
         case "frame":
             guard let o = m["o"], let img = NSImage(data: m.payload)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
@@ -1163,6 +1163,8 @@ final class Collaboration: NSObject {
     /// Control outcomes addressed to this participant, from whichever Mac runs the application.
     func clientControl(_ m: WireMessage) {
         switch m.type {
+        case "page-follow":
+            app.browsers.applyFollow(m)
         case "control-granted":
             guard let o = m["o"], let g = UInt64(m["g"] ?? "") else { return }
             myGrants[o] = g

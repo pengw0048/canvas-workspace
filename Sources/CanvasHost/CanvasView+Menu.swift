@@ -76,6 +76,9 @@ extension CanvasView: NSMenuItemValidation {
                 m.add("Activate") { self.app.runtime.activate(o.id, in: self) }
                 m.add("Capture page") { self.app.capture(objectID: o.id, in: self) }
                 m.add("Open in default browser") { self.app.browsers.openExternally(o.id) }
+                if (o.props.browserMode ?? .reference) != .providerDocument {
+                    m.add("Quote selection") { self.app.browsers.quoteSelection(o.id, in: self) }
+                }
                 if o.props.browserMode == .sharedRuntime {
                     m.add("Create live view") { self.app.createLiveView(of: o.id, in: self) }
                 }
@@ -108,6 +111,7 @@ extension CanvasView: NSMenuItemValidation {
                 m.add("Enter group") { self.enteredGroup = o.id }
             case .sticky, .text, .shape:
                 m.add("Edit text") { self.beginEditing(o.id) }
+                if o.props.url?.contains("#:~:text=") == true { m.add("Go to source") { self.app.browsers.goToSource(o.id, in: self) } }
                 if o.kind == .sticky {
                     m.sub("Color") { cm in
                         for (name, hex) in Theme.stickyColors {

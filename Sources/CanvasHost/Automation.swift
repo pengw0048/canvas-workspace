@@ -530,6 +530,12 @@ final class Automation {
                     c.showKeys(shown)
                 }
                 return json(["ok": true])
+            case "quote":
+                app.browsers.quoteSelection(args[0], in: c)
+                return json(["ok": true])
+            case "gotosource":
+                app.browsers.goToSource(args[0], in: c)
+                return json(["ok": true])
             case "identity":
                 return json(["id": app.identity.id, "name": app.identity.name])
             case "flush":
