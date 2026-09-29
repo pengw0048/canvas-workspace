@@ -202,6 +202,7 @@ final class CaptureService {
             n.props.name = "Capture · \(o.props.appName ?? o.title) · \(t)"
             let nid = try ws.create(n, name: region == nil ? "Capture window" : "Capture region", assets: [a])
             c.selection = [nid]
+            if !c.camera.visibleWorld.contains(n.geom.bounds) { c.reveal(nid, highlight: false) }
             if case .failed = ws.saveState { c.hud.flash("Captured, but not saved yet: \(ws.saveState.label)", seconds: 5) }
             else { c.hud.flash(region == nil ? "Captured the window" : "Captured the region") }
         } catch {
@@ -265,8 +266,8 @@ final class CaptureService {
         }
         for p in cands where vis.contains(WRect(x: p.x, y: p.y, w: size.w, h: size.h)) && free(p) { return p }
         for p in cands where vis.contains(WRect(x: p.x, y: p.y, w: size.w, h: size.h)) { return p }
-        for p in cands where vis.contains(WPoint(x: p.x + min(size.w, 40), y: p.y + min(size.h, 40))) { return p }
-        return WPoint(x: vis.center.x - size.w / 2, y: vis.center.y - size.h / 2)
+        // No free spot in view: stay beside the source (never on top of it); callers reveal the result.
+        return cands.first { free($0) } ?? cands[0]
     }
 
     // MARK: Live view and freeze

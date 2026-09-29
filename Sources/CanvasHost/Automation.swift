@@ -416,6 +416,18 @@ final class Automation {
                 // Test only: act like a modified client that ignores its view-only role.
                 ws.readOnlyScopes.removeAll()
                 return json(["ok": true])
+            case "sendtext":
+                let sp = arg.split(separator: " ", maxSplits: 1).map(String.init)
+                PasteboardService.board.clearContents()
+                PasteboardService.board.setString(sp[1], forType: .string)
+                app.collab?.transferClipboardText(to: sp[0])
+                return json(["ok": true])
+            case "sendfile":
+                app.collab?.transferFile(to: args[0], url: URL(fileURLWithPath: args[1]))
+                return json(["ok": true])
+            case "copyremote":
+                app.collab?.copyFromRemote(args[0])
+                return json(["ok": true])
             case "identity":
                 return json(["id": app.identity.id, "name": app.identity.name])
             case "flush":

@@ -19,7 +19,9 @@ case "click":
     if a.count > 4 { usleep(30_000); let d = CGEvent(mouseEventSource: src, mouseType: .leftMouseDown, mouseCursorPosition: p, mouseButton: .left); d?.setIntegerValueField(.mouseEventClickState, value: 2); post(d); let u = CGEvent(mouseEventSource: src, mouseType: .leftMouseUp, mouseCursorPosition: p, mouseButton: .left); u?.setIntegerValueField(.mouseEventClickState, value: 2); post(u) }
 case "drag":
     let p1 = CGPoint(x: Double(a[2])!, y: Double(a[3])!), p2 = CGPoint(x: Double(a[4])!, y: Double(a[5])!)
-    mouse(.mouseMoved, p1); mouse(.leftMouseDown, p1); usleep(150_000)
+    // Optional pause after pressing, as text views start a drag only from a held press.
+    let pre = a.count > 7 ? Int(a[7])! : 150
+    mouse(.mouseMoved, p1); mouse(.leftMouseDown, p1); usleep(useconds_t(pre * 1000))
     for i in 1...30 { let t = Double(i) / 30; mouse(.leftMouseDragged, CGPoint(x: p1.x + (p2.x - p1.x) * t, y: p1.y + (p2.y - p1.y) * t)); usleep(16_000) }
     // Optional hold at the target with small movements, for spring-loaded destinations.
     let hold = a.count > 6 ? Int(a[6])! : 300

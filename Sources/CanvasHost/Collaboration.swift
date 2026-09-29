@@ -877,7 +877,7 @@ final class Collaboration: NSObject {
         case "transfer-result":
             app.activeCanvas?.hud.flash(m["reason"] ?? "", seconds: 4)
         case "clipboard":
-            let pb = NSPasteboard.general
+            let pb = PasteboardService.board
             pb.clearContents()
             if m["kind"] == "text" { pb.setString(String(data: m.payload, encoding: .utf8) ?? "", forType: .string) }
             else { pb.setData(m.payload, forType: .png) }
@@ -957,16 +957,21 @@ final class Collaboration: NSObject {
 
     func transferClipboardText(to id: ObjectID) {
         guard let g = myGrants[id], let u = upstream else { return }
-        guard let s = NSPasteboard.general.string(forType: .string) else { app.activeCanvas?.hud.flash("Your clipboard has no text"); return }
+        guard let s = PasteboardService.board.string(forType: .string) else { app.activeCanvas?.hud.flash("Your clipboard has no text"); return }
         u.send(WireMessage("transfer-text", ["o": id, "g": "\(g)"], payload: Data(s.utf8)))
         app.activeCanvas?.hud.flash("Sending \(s.count) characters…")
     }
 
-    func transferFile(to id: ObjectID) {
+    func transferFile(to id: ObjectID, url chosen: URL? = nil) {
         guard let g = myGrants[id], let u = upstream else { return }
-        let p = NSOpenPanel()
-        p.message = "Choose a file to send to the host's application"
-        guard p.runModal() == .OK, let url = p.url, let d = try? Data(contentsOf: url) else { return }
+        var url = chosen
+        if url == nil {
+            let p = NSOpenPanel()
+            p.message = "Choose a file to send to the host's application"
+            guard p.runModal() == .OK else { return }
+            url = p.url
+        }
+        guard let url, let d = try? Data(contentsOf: url) else { return }
         u.send(WireMessage("transfer-file", ["o": id, "g": "\(g)", "name": url.lastPathComponent], payload: d))
         app.activeCanvas?.hud.flash("Sending \(url.lastPathComponent) (\(d.count) bytes)…")
     }
