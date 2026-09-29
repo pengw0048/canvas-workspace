@@ -66,6 +66,18 @@ public final class WorkspaceSession {
         workspace.persistence = store
     }
 
+    /// Every asset an object (live or tombstoned, so undo can revive it) or a capture record references.
+    public func referencedAssets() -> Set<AssetID> {
+        var s = Set<AssetID>()
+        for o in workspace.objects.values {
+            if let a = o.props.assetID { s.insert(a) }
+            if let a = o.props.previewAssetID { s.insert(a) }
+        }
+        struct Cap: Decodable { var assetID: String }
+        for c in store.records("capture", as: Cap.self).values { s.insert(c.assetID) }
+        return s
+    }
+
     /// Adds a new or joined shared scope and persists its current state.
     public func attachScope(_ doc: ScopeDocument) throws {
         try store.commit(changes: [doc.id: doc.takeNewChanges()], assets: [])

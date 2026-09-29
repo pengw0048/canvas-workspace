@@ -129,6 +129,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         session = newSession
         _ = session.store.collectOrphanAssets()
+        let freed = session.store.collectUnreferencedAssets(keeping: session.referencedAssets())
+        if freed > 0 { Diagnostics.record("storage", "removed \(freed) unreferenced assets") }
         images = ImageCache(store: session.store)
         capture = CaptureService(app: self)
         runtime = RuntimeCoordinator(app: self)

@@ -363,3 +363,19 @@ final class Pair {
     #expect(a.check(from: "bob", generation: g2, seq: 1, event: down) != .accept)      // paused target
     #expect(a.check(from: "bob", generation: g2, seq: 2, event: RemoteInputEvent(kind: .up)) == .accept)
 }
+
+@Test func supersededPreviewsAreCollectedButCapturesAndTombstonesKept() throws {
+    let s = try WorkspaceSession(directory: tempDir(), user: "a")
+    let ws = s.workspace
+    let p1 = try s.store.stageAsset(Data([1]), mime: "image/png", width: 1, height: 1)
+    let p2 = try s.store.stageAsset(Data([2]), mime: "image/png", width: 1, height: 1)
+    let cap = try s.store.stageAsset(Data([3]), mime: "image/png", width: 1, height: 1)
+    var app = CanvasObject(kind: .app, geom: Geometry(x: 0, y: 0, w: 10, h: 10)); app.props.previewAssetID = p1.id
+    var img = CanvasObject(kind: .image, geom: Geometry(x: 0, y: 0, w: 10, h: 10)); img.props.assetID = cap.id
+    try ws.perform("c", assets: [p1, p2, cap]) { $0.create(app); $0.create(img) }
+    try ws.perform("preview") { $0.update(app.id) { $0.props.previewAssetID = p2.id } }
+    try ws.removeFromCanvas([img.id])
+    let removed = s.store.collectUnreferencedAssets(keeping: s.referencedAssets())
+    #expect(removed == 1)
+    #expect(!s.store.isAssetDurable(p1.id) && s.store.isAssetDurable(p2.id) && s.store.isAssetDurable(cap.id))
+}

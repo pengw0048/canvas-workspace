@@ -226,6 +226,22 @@ public final class Store: WorkspacePersistence {
         return removed
     }
 
+    /// Deletes committed assets that nothing references any more (for example superseded previews).
+    @discardableResult
+    public func collectUnreferencedAssets(keeping referenced: Set<AssetID>) -> Int {
+        var known: [String] = []
+        try? run("SELECT id FROM assets") { known.append(Self.text($0, 0)) }
+        var removed = 0
+        for id in known where !referenced.contains(id) {
+            do {
+                try run("DELETE FROM assets WHERE id = ?", [.text(id)])
+                try? FileManager.default.removeItem(at: assetURL(id))
+                removed += 1
+            } catch { continue }
+        }
+        return removed
+    }
+
     // MARK: Local records (restricted metadata, personal views, recovery descriptors)
 
     public func putRecord<T: Encodable>(_ kind: String, _ id: String, _ value: T) throws {

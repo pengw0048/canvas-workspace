@@ -45,9 +45,29 @@ final class FileService {
         return nil
     }
 
+    /// Opening a file that is already on the canvas offers its existing reference first (§3.2).
+    func existingReference(for u: URL) -> CanvasObject? {
+        ws.live.first { $0.kind == .file && resolvedURL(for: $0)?.standardizedFileURL == u.standardizedFileURL }
+    }
+
     @discardableResult
-    func placeFiles(_ urls: [URL], at center: WPoint, in c: CanvasView) -> [ObjectID] {
+    func placeFiles(_ urls: [URL], at center: WPoint, in c: CanvasView, askAboutExisting: Bool = true) -> [ObjectID] {
         var ids: [ObjectID] = []
+        var urls = urls
+        if askAboutExisting, urls.count == 1, let u = urls.first, let existing = existingReference(for: u),
+           ProcessInfo.processInfo.environment["CANVAS_PASTEBOARD"] == nil {
+            let a = NSAlert()
+            a.messageText = "“\(u.lastPathComponent)” is already on this canvas"
+            a.informativeText = "You can go to the existing reference, or add another reference to the same file. Neither copies the file."
+            a.addButton(withTitle: "Show Existing")
+            a.addButton(withTitle: "Add Another Reference")
+            a.addButton(withTitle: "Cancel")
+            switch a.runModal() {
+            case .alertFirstButtonReturn: c.reveal(existing.id); c.selection = [existing.id]; return [existing.id]
+            case .alertSecondButtonReturn: break
+            default: urls = []
+            }
+        }
         for (i, u) in urls.enumerated() {
             var s = SourceRecord(kind: .file)
             s.path = u.path
