@@ -552,6 +552,9 @@ extension CanvasView {
             if e.keyCode == 19 { fitSelection(); return }    // Shift-2
         }
         switch e.keyCode {
+        case 48:  // Tab
+            selectNext(backward: flags.contains(.shift))
+            return
         case 53:  // Escape
             if case .region = drag { drag = .none; regionTarget = nil; hud.flash("Capture canceled"); updateOverlay(); return }
             if case .none = drag {} else { cancelDrag(); return }

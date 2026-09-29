@@ -105,6 +105,7 @@ final class CanvasView: NSView, SceneContext {
     var remoteCursors: [String: (name: String, point: WPoint, color: NSColor, selection: [ObjectID])] = [:]
     var followUser: String?
     var regionTarget: ObjectID?
+    var accessibilityCache: [ObjectID: ObjectAccessibilityElement] = [:]
     var springTarget: ObjectID?
     var springStart = Date.distantFuture
     var springFired = false
