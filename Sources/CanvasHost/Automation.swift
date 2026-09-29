@@ -1,4 +1,5 @@
 import AppKit
+import Automerge
 import CanvasCore
 
 /// Local test-automation socket (`<data dir>/automation.sock`), enabled with `--automation`.
@@ -7,6 +8,7 @@ final class Automation {
     unowned let app: AppController
     let path: String
     var fd: Int32 = -1
+    var savedHeads: [ObjectID: Set<ChangeHash>] = [:]
 
     init(app: AppController) {
         self.app = app
@@ -113,7 +115,9 @@ final class Automation {
             case "pbtypes":
                 return json(["types": NSPasteboard.general.types?.map(\.rawValue) ?? [], "string": NSPasteboard.general.string(forType: .string) ?? ""])
             case "move":
-                try ws.move([args[0]], dx: Double(args[1]) ?? 0, dy: Double(args[2]) ?? 0, reparent: args.count > 3 ? .some(args[3] == "none" ? nil : args[3]) : nil)
+                let rp: ObjectID?? = args.count > 3 ? .some(args[3] == "none" ? nil : args[3]) : nil
+                try ws.move([args[0]], dx: Double(args[1]) ?? 0, dy: Double(args[2]) ?? 0, reparent: rp)
+                if case .some(let p) = rp { try app.applyScopeRules(ids: [args[0]], newParent: p) }
                 return json(["ok": true])
             case "geom":
                 guard let o = ws.object(args[0]) else { return json(["error": "missing"]) }
@@ -125,6 +129,16 @@ final class Automation {
                 let sp = arg.split(separator: " ", maxSplits: 1).map(String.init)
                 try ws.perform("Edit text") { $0.update(sp[0]) { $0.text = sp.count > 1 ? sp[1] : "" } }
                 return json(["ok": true])
+            case "splice":
+                // splice <id> <start> <delete> <text…> against the heads captured by `base <id>`.
+                let sp = arg.split(separator: " ", maxSplits: 3).map(String.init)
+                guard let o = ws.object(sp[0]) else { return json(["error": "missing"]) }
+                try ws.spliceText(o.id, baseHeads: savedHeads[o.id] ?? ws.heads(o.scope), start: Int(sp[1]) ?? 0, delete: Int(sp[2]) ?? 0, insert: sp.count > 3 ? sp[3] : "")
+                return json(["text": ws.object(o.id)?.text ?? ""])
+            case "base":
+                guard let o = ws.object(args[0]) else { return json(["error": "missing"]) }
+                savedHeads[o.id] = ws.heads(o.scope)
+                return json(["text": o.text])
             case "undo": let r = try ws.undo(); return json(["name": r?.name ?? "", "conflicts": r?.conflicts ?? []])
             case "redo": let r = try ws.redo(); return json(["name": r?.name ?? ""])
             case "remove": try ws.removeFromCanvas(args); return json(["ok": true])
@@ -251,6 +265,20 @@ final class Automation {
                 return json(["controller": a.controller ?? "", "generation": a.generation, "lastSeq": a.lastSeq])
             case "winid":
                 return json(["id": c.window?.windowNumber ?? 0])
+            case "assetreq":
+                app.collab?.upstream?.send(WireMessage("asset-request", ["id": args[0]]))
+                return json(["ok": true])
+            case "hasasset":
+                return json(["durable": app.session.store.isAssetDurable(args[0])])
+            case "js":
+                let sp = arg.split(separator: " ", maxSplits: 1).map(String.init)
+                guard let v = app.browsers.webView(for: sp[0]) else { return json(["error": "no web view"]) }
+                var result = ""
+                var done = false
+                v.evaluateJavaScript(sp[1]) { r, e in result = "\(r ?? e.map { "\($0)" } ?? "nil")"; done = true }
+                let until = Date().addingTimeInterval(3)
+                while !done && Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+                return json(["result": result])
             case "identity":
                 return json(["id": app.identity.id, "name": app.identity.name])
             case "flush":

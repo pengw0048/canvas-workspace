@@ -255,6 +255,24 @@ public final class Workspace {
         return String(data: d, encoding: .utf8) ?? name
     }
 
+    public func heads(_ scope: ScopeID) -> Set<ChangeHash> { scopes[scope]?.doc.heads() ?? [] }
+
+    /// A text edit expressed as a splice against the text the editor last saw.
+    /// Concurrent edits by others are preserved; see `ScopeDocument.splice`.
+    public func spliceText(_ id: ObjectID, baseHeads: Set<ChangeHash>, start: Int, delete: Int, insert: String) throws {
+        guard let before = objects[id], let s = scopes[before.scope] else { throw CanvasError.missingObject(id) }
+        try s.splice(id, baseHeads: baseHeads, start: start, delete: delete, insert: insert)
+        s.commit(Self.commitMessage(name: "Edit text", author: user))
+        var after = before
+        after.text = s.read(id)?.text ?? before.text
+        objects[id] = after
+        persist([s.id: s.takeNewChanges()], assets: [])
+        undoStack.append(UndoEntry(name: "Edit text", changes: [FieldChange(id: id, field: .text, before: before, after: after)]))
+        redoStack.removeAll()
+        onLocalScopeChange?(s.id)
+        onChange?([id])
+    }
+
     public var canUndo: Bool { !undoStack.isEmpty }
     public var canRedo: Bool { !redoStack.isEmpty }
 

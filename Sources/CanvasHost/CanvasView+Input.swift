@@ -18,7 +18,26 @@ extension CanvasView {
 
     // MARK: Mouse
 
+    /// While this participant controls a remote surface, events over it go to the host.
+    func remoteTarget(_ vp: CGPoint) -> (ObjectID, Double, Double)? {
+        guard let id = app.collab?.controlledObject, let o = ws.object(id) else { return nil }
+        let r = camera.toView(app.runtime.contentRect(of: o))
+        guard r.contains(vp) else { return nil }
+        return (id, Double((vp.x - r.minX) / r.width), Double((vp.y - r.minY) / r.height))
+    }
+
+    func sendRemote(_ kind: RemoteInputEvent.Kind, _ e: NSEvent) -> Bool {
+        guard let (id, x, y) = remoteTarget(viewPoint(e)) else { return false }
+        var ev = RemoteInputEvent(kind: kind)
+        ev.x = x
+        ev.y = y
+        app.collab?.sendInput(ev, to: id)
+        return true
+    }
+
     override func mouseDown(with e: NSEvent) {
+        if sendRemote(.down, e) { return }
+        if let a = app.runtime.activeObject, ws.object(a)?.kind == .browser { app.runtime.deactivate(capture: true) }
         window?.makeFirstResponder(self)
         if editor != nil { endEditing() }
         let vp = viewPoint(e)
@@ -103,6 +122,7 @@ extension CanvasView {
     }
 
     override func mouseDragged(with e: NSEvent) {
+        if case .none = drag, sendRemote(.drag, e) { return }
         let vp = viewPoint(e)
         let wp = camera.toWorld(vp)
         notePointer(wp)
@@ -204,6 +224,7 @@ extension CanvasView {
     }
 
     override func mouseUp(with e: NSEvent) {
+        if case .none = drag, sendRemote(.up, e) { return }
         let vp = viewPoint(e)
         let wp = camera.toWorld(vp)
         let op = drag
@@ -449,6 +470,12 @@ extension CanvasView {
     // MARK: Scroll and zoom
 
     override func scrollWheel(with e: NSEvent) {
+        if let (id, x, y) = remoteTarget(viewPoint(e)) {
+            var ev = RemoteInputEvent(kind: .scroll)
+            ev.x = x; ev.y = y; ev.dx = Double(e.scrollingDeltaX); ev.dy = Double(e.scrollingDeltaY)
+            app.collab?.sendInput(ev, to: id)
+            return
+        }
         if followUser != nil { stopFollowing() }
         let vp = viewPoint(e)
         if e.modifierFlags.contains(.command) {
@@ -475,7 +502,23 @@ extension CanvasView {
 
     // MARK: Keyboard
 
+    func sendRemoteKey(_ e: NSEvent, down: Bool) -> Bool {
+        guard let id = app.collab?.controlledObject else { return false }
+        var ev = RemoteInputEvent(kind: .key)
+        ev.keyCode = Int(e.keyCode)
+        ev.keyDown = down
+        ev.text = e.characters
+        ev.flags = UInt64(e.modifierFlags.rawValue)
+        if ws.object(id)?.kind == .browser, down, let t = e.characters, !t.isEmpty, e.modifierFlags.intersection([.command, .control]).isEmpty, t.unicodeScalars.allSatisfy({ $0.value >= 32 }) {
+            ev = RemoteInputEvent(kind: .text)
+            ev.text = t
+        } else if ws.object(id)?.kind == .browser && !down { return true }
+        app.collab?.sendInput(ev, to: id)
+        return true
+    }
+
     override func keyDown(with e: NSEvent) {
+        if sendRemoteKey(e, down: true) { return }
         let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let chars = e.charactersIgnoringModifiers?.lowercased() ?? ""
         if e.keyCode == 49 && flags.isEmpty {  // space
@@ -518,6 +561,7 @@ extension CanvasView {
     }
 
     override func keyUp(with e: NSEvent) {
+        if sendRemoteKey(e, down: false) { return }
         if e.keyCode == 49 { spaceHeld = false; updateCursor(); return }
         super.keyUp(with: e)
     }

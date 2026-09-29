@@ -237,6 +237,11 @@ final class CaptureService {
             WPoint(x: o.geom.x, y: o.geom.bounds.maxY + gap),
             WPoint(x: o.geom.x, y: o.geom.y - gap - size.h),
         ]
+        func free(_ p: WPoint) -> Bool {
+            let r = WRect(x: p.x, y: p.y, w: size.w, h: size.h)
+            return !ws.live.contains { $0.kind != .frame && $0.kind != .group && $0.id != o.id && $0.geom.bounds.intersects(r) }
+        }
+        for p in cands where vis.contains(WRect(x: p.x, y: p.y, w: size.w, h: size.h)) && free(p) { return p }
         for p in cands where vis.contains(WRect(x: p.x, y: p.y, w: size.w, h: size.h)) { return p }
         for p in cands where vis.contains(WPoint(x: p.x + min(size.w, 40), y: p.y + min(size.h, 40))) { return p }
         return WPoint(x: vis.center.x - size.w / 2, y: vis.center.y - size.h / 2)
@@ -279,6 +284,7 @@ final class CaptureService {
                 cfg.minimumFrameInterval = CMTime(value: 1, timescale: 15)
                 cfg.showsCursor = false
                 cfg.queueDepth = 3
+                cfg.ignoreShadowsSingleWindow = true
                 let ls = LiveStream(objectID: id)
                 ls.owner = self
                 let s = SCStream(filter: filter, configuration: cfg, delegate: ls)

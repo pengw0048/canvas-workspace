@@ -237,3 +237,19 @@ final class Pair {
     let order = s.workspace.renderOrder().map(\.id)
     #expect(order.firstIndex(of: f.id)! < order.firstIndex(of: n.id)!)
 }
+
+@Test func concurrentSplicesFromStaleBaseBothSurvive() throws {
+    let p = try Pair()
+    var n = note(0, 0, "Research notes")
+    n.scope = "shared"
+    try p.a.perform("Create") { $0.create(n) }
+    try p.sync()
+    let baseA = p.a.heads("shared"), baseB = p.b.heads("shared")
+    try p.a.spliceText(n.id, baseHeads: baseA, start: 0, delete: 0, insert: "Alice: ")
+    try p.sync()
+    // Bob's editor still shows the old text; his append must not remove Alice's insertion.
+    try p.b.spliceText(n.id, baseHeads: baseB, start: 14, delete: 0, insert: " (Bob)")
+    try p.sync()
+    #expect(p.a.object(n.id)?.text == "Alice: Research notes (Bob)")
+    #expect(p.b.object(n.id)?.text == "Alice: Research notes (Bob)")
+}

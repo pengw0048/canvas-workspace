@@ -281,12 +281,17 @@ final class Collaboration: NSObject {
     func startHosting() {
         guard listener == nil, let code = shares.values.first(where: { $0.hosted })?.inviteCode else { return }
         do {
-            let port = UInt16(ProcessInfo.processInfo.environment["CANVAS_PORT"] ?? "") ?? 0
+            // Reuse the previous port so members can reconnect to a stored address.
+            let port = UInt16(ProcessInfo.processInfo.environment["CANVAS_PORT"] ?? "") ?? UInt16(app.session.store.meta("listenPort") ?? "") ?? 0
             let l = try NWListener(using: Self.parameters(code: code), on: port == 0 ? .any : NWEndpoint.Port(rawValue: port)!)
             l.service = NWListener.Service(name: "\(app.identity.name) — Canvas Workspace", type: "_canvasws._tcp")
             l.stateUpdateHandler = { [weak self] st in
                 DispatchQueue.main.async {
-                    if case .ready = st { self?.listenPort = l.port?.rawValue; self?.refreshUI() }
+                    if case .ready = st {
+                        self?.listenPort = l.port?.rawValue
+                        if let p = l.port?.rawValue { try? self?.app.session.store.setMeta("listenPort", "\(p)") }
+                        self?.refreshUI()
+                    }
                     if case .failed(let e) = st { self?.app.report(e); self?.listener = nil }
                 }
             }

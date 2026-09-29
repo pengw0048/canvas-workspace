@@ -140,6 +140,45 @@ public final class ScopeDocument {
         }
     }
 
+    func textObject(_ oid: ObjectID) throws -> ObjId {
+        guard let m = objectMap(oid) else { throw CanvasError.missingObject(oid) }
+        if case .Object(let t, _)? = try doc.get(obj: m, key: "text") { return t }
+        return try doc.putObject(obj: m, key: "text", ty: .Text)
+    }
+
+    /// Splices text at a position observed at `baseHeads`, mapped through concurrent changes.
+    /// Positions count Unicode scalars.
+    public func splice(_ oid: ObjectID, baseHeads: Set<ChangeHash>, start: Int, delete: Int, insert: String) throws {
+        let t = try textObject(oid)
+        let baseLen = Int(doc.lengthAt(obj: t, heads: baseHeads))
+        var pos: UInt64
+        if start >= baseLen || baseHeads.isEmpty {
+            // End-anchored: map the last character before the edit, then step past it.
+            if start > 0, !baseHeads.isEmpty, let c = try? doc.cursor(obj: t, position: UInt64(start - 1), heads: baseHeads) {
+                pos = (try doc.position(obj: t, cursor: c)) + 1
+            } else { pos = baseHeads.isEmpty ? UInt64(start) : doc.length(obj: t) }
+        } else {
+            let c = try doc.cursor(obj: t, position: UInt64(start), heads: baseHeads)
+            pos = try doc.position(obj: t, cursor: c)
+        }
+        pos = min(pos, doc.length(obj: t))
+        let del = min(Int64(delete), Int64(doc.length(obj: t) - pos))
+        try doc.spliceText(obj: t, start: pos, delete: del, value: insert.isEmpty ? nil : insert)
+    }
+
+    /// Maps a scalar offset observed at `baseHeads` to the current text.
+    public func mapPosition(_ oid: ObjectID, baseHeads: Set<ChangeHash>, position: Int) -> Int? {
+        guard let t = try? textObject(oid) else { return nil }
+        let baseLen = Int(doc.lengthAt(obj: t, heads: baseHeads))
+        if position >= baseLen {
+            guard position > 0, let c = try? doc.cursor(obj: t, position: UInt64(position - 1), heads: baseHeads),
+                  let p = try? doc.position(obj: t, cursor: c) else { return Int(doc.length(obj: t)) }
+            return Int(p) + 1
+        }
+        guard let c = try? doc.cursor(obj: t, position: UInt64(position), heads: baseHeads), let p = try? doc.position(obj: t, cursor: c) else { return nil }
+        return Int(p)
+    }
+
     /// Removes an object record entirely. Used only when an object leaves this scope by publication.
     public func purge(_ oid: ObjectID) throws {
         guard let objs = objectsMap else { return }

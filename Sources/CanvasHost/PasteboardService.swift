@@ -78,7 +78,9 @@ final class PasteboardService: NSObject {
         r.syncSubset(ws, ids: Set(set))
         r.refreshDetail(ws)
         if let background { ctx.setFillColor(background.cgColor); ctx.fill(CGRect(x: 0, y: 0, width: pw, height: ph)) }
-        ctx.scaleBy(x: s, y: s)
+        // The layer tree is y-down; CGContext is y-up.
+        ctx.translateBy(x: 0, y: CGFloat(ph))
+        ctx.scaleBy(x: s, y: -s)
         root.render(in: ctx)
         return ctx.makeImage()
     }

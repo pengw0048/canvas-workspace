@@ -210,7 +210,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Configurable global host command (default ⌃⌥Space): return input to the canvas.
     func hostCommand() {
-        if runtime.activeObject != nil {
+        if let id = collab?.controlledObject {
+            collab?.releaseControl(id)
+            activeCanvas?.hud.flash("Released control of the remote application")
+        } else if runtime.activeObject != nil {
             runtime.deactivate(capture: true)
         } else {
             NSApp.activate(ignoringOtherApps: true)
