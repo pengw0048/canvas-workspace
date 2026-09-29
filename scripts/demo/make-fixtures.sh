@@ -13,8 +13,17 @@ main{padding:28px 48px} .card{background:white;border-radius:14px;padding:22px 2
 <main><div class="card"><div class="big">−60% p95</div><div>across four regions after enabling the cache</div></div>
 <div class="card"><b>Method</b><ul><li>12,000 sampled requests per region</li><li>Same traffic replayed before and after</li><li>Cold-start requests excluded</li></ul></div></main></body></html>
 HTML
-printf 'region,p95_before_ms,p95_after_ms\nus-east,42,17\neu-west,47,19\nap-south,55,23\nsa-east,51,21\n' > $d/metrics.csv.txt
-printf 'Launch review\n\nSummary\nThe read-through cache cut p95 latency by about 60%% in every region.\n\nEvidence\n' > $d/review.txt
-textutil -convert rtfd $d/review.txt -output "$d/Launch review.rtfd"; rm $d/review.txt
-swift "$(dirname $0)/chart.swift" $d/latency-chart.png
+# Terminal fixture: a project folder whose shell has a neutral prompt and window title.
+t=$d/cache-service; mkdir -p $t/bin $t/.zsh
+cp "$(dirname $0)/loadtest.sh" $t/bin/cache-loadtest
+printf "PROMPT='%%F{green}cache-service%%f %%# '\n" > $t/.zsh/.zshrc
+cat > $t/load-test.command <<'SH'
+#!/bin/zsh -f
+d=${0:A:h}; cd $d; echo $$ > $d/.pid; export PATH="$d/bin:$PATH" ZDOTDIR=$d/.zsh
+printf '\033]7;file://%s%s\007\033]0;load test\007\033[8;22;86t' "$HOST" "$d"; clear
+exec zsh
+SH
+chmod +x $t/bin/cache-loadtest $t/load-test.command
+# Numbers and Keynote sources; open them once and save native copies (see director.sh).
+${PYTHON:-python3} "$(dirname $0)/office-fixtures.py" $d
 echo "fixtures in $d"
