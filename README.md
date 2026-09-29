@@ -20,7 +20,7 @@ scripts/build-app.sh           # release build → dist/CanvasWorkspace.app
 open dist/CanvasWorkspace.app
 ```
 
-The app covers the display's visible area (menu bar and Dock stay available). For development,
+The app fills the display like the wallpaper; the menu bar and Dock stay visible above it. For development,
 run a normal resizable window instead:
 
 ```sh

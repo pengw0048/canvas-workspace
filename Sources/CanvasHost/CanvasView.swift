@@ -83,6 +83,7 @@ final class CanvasView: NSView, SceneContext {
     let overlay = CAShapeLayer()
     let overlayFill = CAShapeLayer()
     let presenceLayer = CALayer()
+    var minimap: MinimapView?
     var tool: Tool = .pointer { didSet { toolbar?.update(); window?.invalidateCursorRects(for: self); updateCursor() } }
     var selection: Set<ObjectID> = [] {
         didSet {
@@ -112,7 +113,10 @@ final class CanvasView: NSView, SceneContext {
     var inkColor = Theme.inkColors[0]
     var stickyColor = Theme.stickyColors[0].1
     var highlightUntil: [ObjectID: Date] = [:]
-    var remoteCursors: [String: (name: String, point: WPoint, color: NSColor, selection: [ObjectID])] = [:]
+    var remoteCursors: [String: (name: String, point: WPoint, color: NSColor, selection: [ObjectID], chat: String?)] = [:]
+    var chatText: String?
+    var chatField: NSTextField?
+    var chatClear: Timer?
     var followUser: String?
     var regionTarget: ObjectID?
     var accessibilityCache: [ObjectID: ObjectAccessibilityElement] = [:]
@@ -151,6 +155,10 @@ final class CanvasView: NSView, SceneContext {
         let tb = ToolbarView(canvas: self)
         addSubview(tb)
         toolbar = tb
+        let mm = MinimapView(canvas: self)
+        mm.isHidden = UserDefaults.standard.bool(forKey: "hideMinimap")
+        addSubview(mm)
+        minimap = mm
         applyCamera()
     }
 
@@ -190,9 +198,21 @@ final class CanvasView: NSView, SceneContext {
         overlayFill.frame = bounds
         presenceLayer.frame = bounds
         CATransaction.commit()
-        hud.frame = bounds
-        toolbar?.layoutIn(bounds)
+        let safe = safeRect
+        hud.frame = safe
+        toolbar?.layoutIn(safe)
+        minimap?.frame = NSRect(origin: CGPoint(x: safe.minX + 14, y: safe.maxY - MinimapView.size.height - 14), size: MinimapView.size)
+        minimap?.refreshObjects()
         editor?.reposition()
+    }
+
+    /// The part of the view not under the menu bar or the Dock; chrome stays inside it.
+    var safeRect: NSRect {
+        guard let w = window, let sc = w.screen else { return bounds }
+        let vis = sc.visibleFrame, wf = w.frame
+        let top = max(0, wf.maxY - vis.maxY), bottom = max(0, vis.minY - wf.minY)
+        let left = max(0, vis.minX - wf.minX), right = max(0, wf.maxX - vis.maxX)
+        return NSRect(x: left, y: top, width: bounds.width - left - right, height: bounds.height - top - bottom)
     }
 
     override func viewDidChangeBackingProperties() {
@@ -233,6 +253,7 @@ final class CanvasView: NSView, SceneContext {
 
     func applyCamera() {
         renderer.applyCamera(camera)
+        minimap?.refreshViewport()
         needsDisplay = true
         updateOverlay()
         editor?.reposition()
@@ -365,6 +386,7 @@ final class CanvasView: NSView, SceneContext {
         renderer.sync(ws)
         renderer.refreshDetail(ws)
         updateOverlay()
+        minimap?.refreshObjects()
         editor?.remoteUpdate()
         hud.update()
     }
@@ -389,6 +411,28 @@ final class CanvasView: NSView, SceneContext {
     }
 
     /// Screen-space selection outlines, handles, marquee, and highlights.
+    /// A fixed caption in the top-left corner (picture-in-picture participants).
+    func showCaption(_ text: String) {
+        let l = NSTextField(labelWithString: text)
+        l.font = .systemFont(ofSize: 12, weight: .semibold)
+        l.textColor = .white
+        l.drawsBackground = true
+        l.backgroundColor = NSColor.black.withAlphaComponent(0.55)
+        l.wantsLayer = true
+        l.layer?.cornerRadius = 6
+        l.layer?.masksToBounds = true
+        l.sizeToFit()
+        l.frame = NSRect(x: 10, y: 10, width: l.frame.width + 12, height: l.frame.height + 4)
+        l.alignment = .center
+        addSubview(l)
+    }
+
+    @objc func toggleMinimap(_ s: Any?) {
+        guard let m = minimap else { return }
+        m.isHidden.toggle()
+        UserDefaults.standard.set(m.isHidden, forKey: "hideMinimap")
+    }
+
     func updateOverlay() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -505,31 +549,17 @@ final class CanvasView: NSView, SceneContext {
     // MARK: Presence
 
     func updatePresence() {
+        minimap?.refreshCursors()
         presenceLayer.sublayers?.forEach { $0.removeFromSuperlayer() }
+        // A participant shown picture-in-picture for a recording also draws its own automated pointer.
+        if CommandLine.arguments.contains("--pip"), let lp = lastPointerWorld {
+            drawCursor(at: camera.toView(lp), name: app.identity.name, color: app.collab?.myColor ?? .systemPink, chat: chatText)
+        } else if chatField == nil, let t = chatText, !t.isEmpty, let lp = lastPointerWorld {
+            // A sent message stays beside the real pointer while collaborators still see it.
+            drawCursor(at: camera.toView(lp), name: app.identity.name, color: app.collab?.myColor ?? .systemPink, chat: t, arrow: false)
+        }
         for (_, c) in remoteCursors {
-            let p = camera.toView(c.point)
-            let dot = CAShapeLayer()
-            let path = CGMutablePath()
-            path.move(to: p)
-            path.addLine(to: CGPoint(x: p.x, y: p.y + 16))
-            path.addLine(to: CGPoint(x: p.x + 4.5, y: p.y + 12))
-            path.addLine(to: CGPoint(x: p.x + 11, y: p.y + 12))
-            path.closeSubpath()
-            dot.path = path
-            dot.fillColor = c.color.cgColor
-            dot.strokeColor = NSColor.white.cgColor
-            dot.lineWidth = 1
-            presenceLayer.addSublayer(dot)
-            let label = TextLayer()
-            label.attributed = NSAttributedString(string: c.name, attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.white])
-            label.inset = CGSize(width: 5, height: 2)
-            label.backgroundColor = c.color.cgColor
-            label.cornerRadius = 4
-            let w = (label.attributed.size().width) + 10
-            label.frame = CGRect(x: p.x + 10, y: p.y + 14, width: w, height: 17)
-            label.contentsScale = renderer.backingScale
-            label.setNeedsDisplay()
-            presenceLayer.addSublayer(label)
+            drawCursor(at: camera.toView(c.point), name: c.name, color: c.color, chat: c.chat)
             // Remote selection outlines use a dashed collaborator color, distinct from local selection.
             let sel = CAShapeLayer()
             let sp = CGMutablePath()
@@ -545,41 +575,95 @@ final class CanvasView: NSView, SceneContext {
 
     // MARK: Capture flight
 
-    /// A short flash on the captured region, then the image flies to its new object.
+    /// Brackets lock onto the captured region, a scan line sweeps it and it flashes; then the image flies to its object.
     func flyCapture(_ img: CGImage, from src: WRect, to id: ObjectID) {
         guard let o = ws.object(id), let root = layer, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
         let from = camera.toView(src), to = camera.toView(o.geom.rect)
-        let flash = CALayer()
-        flash.frame = from
-        flash.backgroundColor = NSColor.white.cgColor
-        flash.cornerRadius = 6
-        root.addSublayer(flash)
-        let fade = CABasicAnimation(keyPath: "opacity")
-        fade.fromValue = 0.85
-        fade.toValue = 0
-        fade.duration = 0.35
-        flash.opacity = 0
-        flash.add(fade, forKey: "fade")
-        let chip = CALayer()
-        chip.contents = img
-        chip.contentsGravity = .resize
-        chip.frame = from
-        chip.cornerRadius = 6
-        chip.masksToBounds = true
-        chip.borderWidth = 1
-        chip.borderColor = NSColor.white.withAlphaComponent(0.8).cgColor
-        root.addSublayer(chip)
-        renderer.layers[id]?.opacity = 0
-        CATransaction.begin()
-        CATransaction.setAnimationDuration(0.5)
-        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
-        CATransaction.setCompletionBlock { [weak self] in
-            chip.removeFromSuperlayer()
-            flash.removeFromSuperlayer()
-            self?.renderer.layers[id]?.opacity = 1
+        let accent = NSColor(calibratedRed: 0.22, green: 0.89, blue: 1, alpha: 1).cgColor
+        let now = CACurrentMediaTime()
+        func animate(_ l: CALayer, _ key: String, _ a: Any, _ b: Any, at t: Double, for d: Double) {
+            let an = CABasicAnimation(keyPath: key)
+            an.fromValue = a
+            an.toValue = b
+            an.beginTime = now + t
+            an.duration = d
+            an.fillMode = .both
+            an.isRemovedOnCompletion = false
+            an.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            l.add(an, forKey: key)
         }
-        chip.frame = to
-        CATransaction.commit()
+        let fx = CALayer()
+        fx.frame = from
+        root.addSublayer(fx)
+        // Corner brackets snap in from slightly outside the region.
+        let brackets = CAShapeLayer()
+        brackets.frame = fx.bounds
+        let arm = min(22, min(from.width, from.height) / 4)
+        let path = CGMutablePath()
+        for (x, y, dx, dy) in [(0.0, 0.0, 1.0, 1.0), (from.width, 0, -1, 1), (0, from.height, 1, -1), (from.width, from.height, -1, -1)] {
+            path.move(to: CGPoint(x: x + dx * arm, y: y))
+            path.addLine(to: CGPoint(x: x, y: y))
+            path.addLine(to: CGPoint(x: x, y: y + dy * arm))
+        }
+        brackets.path = path
+        brackets.strokeColor = accent
+        brackets.fillColor = nil
+        brackets.lineWidth = 3
+        brackets.shadowColor = accent
+        brackets.shadowRadius = 6
+        brackets.shadowOpacity = 0.9
+        brackets.shadowOffset = .zero
+        fx.addSublayer(brackets)
+        animate(brackets, "transform.scale", 1.18, 1, at: 0, for: 0.18)
+        animate(brackets, "opacity", 0, 1, at: 0, for: 0.12)
+        // A tint and a bright scan line sweep the region from top to bottom.
+        let tint = CALayer()
+        tint.frame = fx.bounds
+        tint.backgroundColor = accent.copy(alpha: 0.12)
+        tint.masksToBounds = true
+        fx.addSublayer(tint)
+        let beam = CAGradientLayer()
+        beam.colors = [accent.copy(alpha: 0)!, accent.copy(alpha: 0.85)!, NSColor.white.cgColor, accent.copy(alpha: 0)!]
+        beam.locations = [0, 0.7, 0.85, 1]
+        beam.frame = CGRect(x: 0, y: -28, width: from.width, height: 28)
+        tint.addSublayer(beam)
+        animate(beam, "position.y", -14, from.height + 14, at: 0.08, for: 0.34)
+        animate(tint, "opacity", 1, 0, at: 0.42, for: 0.25)
+        // The flash marks the moment pixels are taken.
+        let flash = CALayer()
+        flash.frame = fx.bounds
+        flash.backgroundColor = NSColor.white.cgColor
+        flash.opacity = 0
+        fx.addSublayer(flash)
+        animate(flash, "opacity", 0.9, 0, at: 0.42, for: 0.3)
+        animate(brackets, "opacity", 1, 0, at: 0.5, for: 0.25)
+        renderer.layers[id]?.opacity = 0
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+            let chip = CALayer()
+            chip.contents = img
+            chip.contentsGravity = .resize
+            chip.frame = from
+            chip.cornerRadius = 6
+            chip.masksToBounds = false
+            chip.borderWidth = 1.5
+            chip.borderColor = accent
+            chip.shadowColor = accent
+            chip.shadowRadius = 14
+            chip.shadowOpacity = 0.8
+            chip.shadowOffset = .zero
+            root.addSublayer(chip)
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(0.5)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+            CATransaction.setCompletionBlock { [weak self] in
+                chip.removeFromSuperlayer()
+                fx.removeFromSuperlayer()
+                self?.renderer.layers[id]?.opacity = 1
+            }
+            chip.frame = to
+            chip.shadowOpacity = 0
+            CATransaction.commit()
+        }
     }
 
     // MARK: Snapshot for evidence

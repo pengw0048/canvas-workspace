@@ -566,6 +566,7 @@ extension CanvasView {
             if !spaceHeld { spaceHeld = true; updateCursor() }
             return
         }
+        if chars == "/" && flags.subtracting(.shift).isEmpty { startChat(); return }
         if flags.contains(.shift) && !flags.contains(.command) {
             if e.keyCode == 18 { fitAll(); return }          // Shift-1
             if e.keyCode == 19 { fitSelection(); return }    // Shift-2

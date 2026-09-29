@@ -58,7 +58,7 @@ arrives without the click (verified afterwards).
 
 | Capability | Status | Evidence / limitation |
 | --- | --- | --- |
-| Desktop-scale surface | Verified | A borderless canvas per display reaches the top edge; the menu bar auto-hides while the canvas is frontmost and the Dock stays reachable. One Space. |
+| Desktop-scale surface | Verified | A borderless canvas per display fills the display like the wallpaper; the menu bar and Dock stay visible above it, and canvas chrome stays clear of them. One Space. |
 | Continuous pan/zoom camera, dot grid, level of detail with hysteresis | Verified (rendering) | Screenshots at several zoom levels. Gesture feel not yet reviewed by a person. |
 | Sticky, text, shape (rect/ellipse/line/arrow), ink, highlighter, eraser, frame, image, connector | Verified (rendering and storage); eraser Unverified | Created through automation; pointer creation paths not exercised by a person. |
 | Rotation for native objects; app/file previews stay upright | Verified (rendering) | |
@@ -142,6 +142,9 @@ and identities on the same Mac, connected over loopback TLS-PSK. **Simulated:** 
 | Offline member edits replay after the host returns | Verified | |
 | Asset fetch permission: private asset denied; published asset delivered | Verified | |
 | Presence, cursors, remote selection outlines, follow mode, movement claims | Verified (presence, cursor and dashed selection outline, follow) / Unverified (claims) | Bob's camera followed Alice's; banner offered Stop following. |
+| Follow shows the leader's visible region at the follower's view size | Verified | A 560×350 picture-in-picture member followed a full-screen host and saw the same region, eased over presence updates. |
+| Cursor chat | Verified | `/` opens a bubble at the pointer; text reached the other participant as it was typed and cleared four seconds after sending. Automated with `chat`. |
+| Minimap | Verified | Shows objects, the current view, and collaborators' pointers; click or drag moves the view (⇧⌘M toggles). |
 | Revoke member → future access denied, member keeps a private recovered copy | Verified | Bob's shared scope was removed, its 12 objects kept as private copies; rejoining with the code and joining with a wrong code were both refused. |
 | Shared browser runtime: single controller, generation tokens, stale/replayed events rejected, reclaim | Verified | Controller click incremented the page counter; generation 0 and post-reclaim generation 1 events rejected. Grant was issued through automation instead of the host's dialog. |
 | Shared native app: live frames, grant, remote input, local takeover reclaim, stale grants | Verified | Bob (second process) saw TextEdit live ("Live from host"), clicked and typed into the host's real TextEdit document, and lost control whenever the host used the app locally; his later and replayed events were rejected. A Dock-layer target-check bug found on the way was fixed. When the host quit, Bob kept the last published frame with "Host offline". |

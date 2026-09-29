@@ -6,7 +6,6 @@ import CanvasCore
 final class CanvasWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
-    /// Borderless canvas windows may cover the auto-hidden menu bar area.
     override func constrainFrameRect(_ r: NSRect, to screen: NSScreen?) -> NSRect { styleMask.contains(.titled) ? super.constrainFrameRect(r, to: screen) : r }
 }
 
@@ -19,6 +18,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let profile: String
     let dataDir: URL
     let windowed: Bool
+    /// `--pip`: a participant whose view floats in a screen corner, for recordings.
+    let pip = CommandLine.arguments.contains("--pip")
     var session: WorkspaceSession!
     var workspace: Workspace { session.workspace }
     var identity: Identity!
@@ -47,15 +48,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// connected window surface live.
     func presentationChanged() {
         NSApp.mainMenu?.items.first { $0.title == "Debug" }?.isHidden = presenting
-        if !windowed {
-            NSApp.presentationOptions = presenting ? [.autoHideMenuBar, .autoHideDock] : [.autoHideMenuBar]
-            // With the Dock hidden too, the canvas covers the whole display.
-            for w in windows {
-                guard let screen = w.screen ?? NSScreen.main else { continue }
-                let v = screen.visibleFrame
-                w.setFrame(presenting ? screen.frame : NSRect(x: v.minX, y: v.minY, width: v.width, height: screen.frame.maxY - v.minY), display: true)
-            }
-        }
         for c in canvases {
             c.hud.update()
             c.toolbar?.setAutoHide(presenting)
@@ -107,9 +99,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if ProcessInfo.processInfo.environment["CANVAS_AUTOMATION"] != nil || CommandLine.arguments.contains("--automation") {
             automation = Automation(app: self)
         }
-        let quiet = CommandLine.arguments.contains("--background") || CommandLine.arguments.contains("--hidden")
+        let quiet = CommandLine.arguments.contains("--background") || CommandLine.arguments.contains("--hidden") || pip
         if !quiet { NSApp.activate(ignoringOtherApps: true) }
-        if CommandLine.arguments.contains("--hidden") { NSApp.setActivationPolicy(.accessory) }
+        if CommandLine.arguments.contains("--hidden") || pip { NSApp.setActivationPolicy(.accessory) }
     }
 
     func fail(_ error: Error, _ dir: URL) {
@@ -176,7 +168,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         workspace.onSaveState = { [weak self] s in self?.saveStateChanged(s) }
         buildWindows()
         runtime.startupScan()
-        if !windowed { NSApp.presentationOptions = [.autoHideMenuBar] }
         if let e = currentWorkspaceEntry {
             UserDefaults.standard.set(e.id, forKey: "lastWorkspace.\(profile)")
             for w in windows { w.title = e.name }
@@ -261,15 +252,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.stringValue ?? "\(i)"
             let frame: NSRect
             let style: NSWindow.StyleMask
-            if windowed {
+            if pip {
+                // A participant's own view shown in a corner for recordings.
+                let v = screen.visibleFrame
+                frame = NSRect(x: v.maxX - 576, y: v.minY + 16, width: 560, height: 350)
+                style = [.borderless]
+            } else if windowed {
                 let v = screen.visibleFrame
                 frame = NSRect(x: v.minX + 60, y: v.minY + 60, width: min(1280, v.width - 120), height: min(820, v.height - 120))
                 style = [.titled, .closable, .resizable, .miniaturizable]
             } else {
-                // The menu bar auto-hides while the canvas is frontmost, so the canvas reaches the top edge.
-                // The Dock stays reachable.
-                let v = screen.visibleFrame
-                frame = NSRect(x: v.minX, y: v.minY, width: v.width, height: screen.frame.maxY - v.minY)
+                // The canvas takes the wallpaper's place: it fills the display, and the menu bar and Dock float above it.
+                frame = screen.frame
                 style = [.borderless]
             }
             let w = CanvasWindow(contentRect: frame, styleMask: style, backing: .buffered, defer: false)
@@ -289,7 +283,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             canvases.append(cv)
             // `--background` keeps development runs behind the user's windows without taking focus.
             // `--hidden` runs a participant with no visible window (for recordings).
-            if CommandLine.arguments.contains("--hidden") {
+            if pip {
+                w.level = .floating
+                w.ignoresMouseEvents = true
+                w.hasShadow = true
+                cv.layer?.cornerRadius = 12
+                cv.layer?.masksToBounds = true
+                cv.layer?.borderWidth = 1
+                cv.layer?.borderColor = NSColor.white.withAlphaComponent(0.7).cgColor
+                cv.toolbar?.isHidden = true
+                cv.minimap?.isHidden = true
+                cv.showCaption("\(identity.name)'s view")
+                w.orderFrontRegardless()
+            } else if CommandLine.arguments.contains("--hidden") {
                 w.alphaValue = 0
                 w.ignoresMouseEvents = true
                 w.orderOut(nil)
@@ -660,6 +666,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             item(m, "Fit All", #selector(CanvasView.fitAllAction(_:)), "1", [.shift])
             item(m, "Fit Selection", #selector(CanvasView.fitSelectionAction(_:)), "2", [.shift])
             item(m, "Back", #selector(CanvasView.backAction(_:)), "[", [.command, .option])
+            item(m, "Minimap", #selector(CanvasView.toggleMinimap(_:)), "m", [.command, .shift])
             m.addItem(.separator())
             item(m, "Inspector", #selector(toggleInspector(_:)), "i", [.command, .option], target: self)
             item(m, "Workspace History…", #selector(showHistory(_:)), "y", [.command, .shift], target: self)

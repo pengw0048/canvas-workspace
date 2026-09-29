@@ -8,9 +8,10 @@ recorded here with evidence.
 
 - One Swift Package Manager executable (`CanvasHost`) bundled into `CanvasWorkspace.app` by
   `scripts/build-app.sh`. Builds with the Command Line Tools only; no Xcode project.
-- The canvas is a borderless window per display covering everything but the Dock. The menu bar
-  auto-hides while the canvas is frontmost and appears on hover, so application menus, app
-  switching, and system UI keep working. The canvas lives on one Space. A macOS full-screen Space
+- The canvas is a borderless window per display that takes the wallpaper's place: it fills the
+  display, and the menu bar and the Dock stay visible above it, so application menus, app
+  switching, and system UI keep working and the menu bar does not appear and disappear as input
+  moves between the canvas and real apps. The canvas lives on one Space. A macOS full-screen Space
   was rejected because activating another app would switch Spaces and real windows could not come
   above the canvas; a desktop-level window was rejected because real windows would always float
   above canvas content.

@@ -493,6 +493,18 @@ final class Automation {
                     try? ws.spliceText(id, baseHeads: ws.heads(cur.scope), start: cur.text.unicodeScalars.count, delete: 0, insert: ch)
                 }
                 return json(["ok": true])
+            case "chat":
+                // chat <cps> <text…>: types cursor chat as this participant; 0 shows it at once.
+                let sp = arg.split(separator: " ", maxSplits: 1).map(String.init)
+                guard sp.count == 2, let cps = Double(sp[0]) else { return json(["error": "chat cps text"]) }
+                guard cps > 0 else { c.setChat(sp[1]); return json(["ok": true]) }
+                var shown = "", rest = Array(sp[1])
+                Timer.scheduledTimer(withTimeInterval: 1 / cps, repeats: true) { t in
+                    guard !rest.isEmpty else { t.invalidate(); return }
+                    shown.append(rest.removeFirst())
+                    c.setChat(shown)
+                }
+                return json(["ok": true])
             case "identity":
                 return json(["id": app.identity.id, "name": app.identity.name])
             case "flush":

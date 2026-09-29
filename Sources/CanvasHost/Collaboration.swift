@@ -53,6 +53,7 @@ struct Presence {
     var camera: (Double, Double, Double)?
     var claims: [ObjectID: Date]
     var seen: Date
+    var chat: String?
 }
 
 final class Peer {
@@ -121,6 +122,7 @@ final class Collaboration: NSObject {
     // Host side
     /// One listener per hosted share: its invite code is that share's key, so a code opens only its share.
     var listeners: [ScopeID: NWListener] = [:]
+    var listenRetries = 0
     var listenPorts: [ScopeID: UInt16] = [:]
     var listenPort: UInt16? { listenPorts.values.min() }
     var peers: [Peer] = []
@@ -144,6 +146,7 @@ final class Collaboration: NSObject {
     var panel: CollaborationPanel?
     var presenceTimer: Timer?
     var lastPresenceSent = Date.distantPast
+    var isConnected: Bool { peers.contains { $0.userID != nil } || (upstream.map { !$0.closed } ?? false) }
     var browser: NWBrowser?
     var discovered: [NWBrowser.Result] = []
 
@@ -351,7 +354,15 @@ final class Collaboration: NSObject {
                             self.saveShare(sid)
                             self.refreshUI()
                         }
-                        if case .failed(let e) = st { self.app.report(e); self.listeners[sid] = nil; self.listenPorts[sid] = nil }
+                        if case .failed(let e) = st {
+                            self.listeners[sid] = nil
+                            self.listenPorts[sid] = nil
+                            // A previous instance may still be releasing the port right after a relaunch.
+                            if case .posix(.EADDRINUSE) = e, self.listenRetries < 20 {
+                                self.listenRetries += 1
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.startHosting() }
+                            } else { self.app.report(e) }
+                        }
                     }
                 }
                 l.newConnectionHandler = { [weak self] c in
@@ -1098,8 +1109,8 @@ final class Collaboration: NSObject {
         let p = c.lastPointerWorld ?? c.camera.center
         let hex = myColor.usingColorSpace(.sRGB).map { String(format: "#%02X%02X%02X", Int($0.redComponent * 255), Int($0.greenComponent * 255), Int($0.blueComponent * 255)) } ?? "#FF2D55"
         return WireMessage("presence", ["u": me, "n": app.identity.name, "c": hex, "px": "\(p.x)", "py": "\(p.y)",
-                                        "sel": sel.joined(separator: ","), "cam": "\(c.camera.center.x),\(c.camera.center.y),\(c.camera.zoom)",
-                                        "claims": claims.joined(separator: ",")])
+                                        "sel": sel.joined(separator: ","), "cam": "\(c.camera.center.x),\(c.camera.center.y),\(c.camera.zoom),\(c.camera.viewSize.width),\(c.camera.viewSize.height)",
+                                        "claims": claims.joined(separator: ","), "chat": c.chatText ?? ""])
     }
 
     func sendPresence(to ps: [Peer]) {
@@ -1120,14 +1131,20 @@ final class Collaboration: NSObject {
         let pr = Presence(userID: u, name: m["n"] ?? "Collaborator", color: NSColor(hex: m["c"]) ?? .systemPink,
                           pointer: Double(m["px"] ?? "").flatMap { x in Double(m["py"] ?? "").map { WPoint(x: x, y: $0) } },
                           selection: (m["sel"] ?? "").split(separator: ",").map(String.init),
-                          camera: camParts.count == 3 ? (camParts[0], camParts[1], camParts[2]) : nil, claims: claims, seen: Date())
+                          camera: camParts.count >= 3 ? (camParts[0], camParts[1], camParts[2]) : nil, claims: claims, seen: Date(),
+                          chat: m["chat"].flatMap { $0.isEmpty ? nil : String($0.prefix(280)) })
         presence[u] = pr
         for c in app.canvases {
-            if let p = pr.pointer { c.remoteCursors[u] = (pr.name, p, pr.color, pr.selection) }
+            if let p = pr.pointer { c.remoteCursors[u] = (pr.name, p, pr.color, pr.selection, pr.chat) }
             if c.followUser == u, let cam = pr.camera {
-                c.camera.center = WPoint(x: cam.0, y: cam.1)
-                c.camera.zoom = cam.2
-                c.applyCamera()
+                // Show the region the leader sees, scaled to this view's size, and ease toward it.
+                var next = c.camera
+                next.center = WPoint(x: cam.0, y: cam.1)
+                next.zoom = cam.2
+                if camParts.count == 5, camParts[3] > 0, camParts[4] > 0 {
+                    next.zoom = cam.2 * min(c.camera.viewSize.width / camParts[3], c.camera.viewSize.height / camParts[4])
+                }
+                c.setCamera(next, animated: true, record: false, duration: 0.15)
             }
             c.updateOverlay()
         }

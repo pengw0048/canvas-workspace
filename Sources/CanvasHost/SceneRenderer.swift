@@ -318,6 +318,9 @@ final class SceneRenderer {
     func configure(_ l: ObjectLayer, _ o0: CanvasObject, _ ws: Workspace, recordLast: Bool = true) {
         let o = effective(o0)
         if recordLast { l.lastObject = o0 }
+        // Only the paths that pin a chip or badge keep it screen-sized.
+        l.label.pin = nil
+        l.badge.pin = nil
         position(l, o)
         // Offscreen objects get their pixels only when they come into view (refreshDetail).
         if o.kind != .connector && o.kind != .frame && !loadedWorld.intersects(o.geom.bounds.insetBy(-o.geom.w)) {
