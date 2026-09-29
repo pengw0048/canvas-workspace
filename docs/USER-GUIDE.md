@@ -37,7 +37,8 @@ Highlighter (M), Eraser (E), Frame (F). Double-click empty canvas to type text.
 - **Bring in a window**: toolbar window button or ⇧⌘N. The window stays a real window of its app.
 - **Activate**: double-click the surface or press Return. The view zooms to 1:1, the real window
   moves to the surface's place, and the app owns the keyboard, menus, and clipboard.
-- **Return to the canvas**: ⌃⌥Space, the "Return to canvas" button, or click the canvas.
+- **Return to the canvas**: ⌃⌥Space, the "Return to canvas" button, click the canvas, or scroll or
+  pinch with ⌃⌥ held over the app (that gesture goes to the canvas, not the app).
 - **Capture**: right-click → Capture window, or Capture region… and drag the area. ⌃⌥C captures
   the active application, or the frontmost window of another app. The capture appears next to the
   source, selected, ready to annotate or copy.

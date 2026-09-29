@@ -37,6 +37,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var search: SearchPanel?
     var saveRetry: Timer?
     var history: HistoryPanel?
+    lazy var gestures = GestureHandoff(app: self)
 
     init(profile: String, windowed: Bool) {
         self.profile = profile

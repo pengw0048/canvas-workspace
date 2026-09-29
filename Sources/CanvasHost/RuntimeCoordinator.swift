@@ -379,6 +379,7 @@ final class RuntimeCoordinator: NSObject {
         }
         NSRunningApplication(processIdentifier: b.pid)?.activate(options: [])
         showReturnPanel(for: id)
+        app.gestures.start()
         app.collab?.localActivity(on: id)
         refreshAll(id)
     }
@@ -410,6 +411,7 @@ final class RuntimeCoordinator: NSObject {
     /// Returns input to the canvas. The application keeps running.
     func deactivate(capture: Bool, raiseCanvas: Bool = true) {
         guard let id = activeObject else { return }
+        app.gestures.stop()
         if ws.objects[id]?.kind == .browser {
             activeObject = nil
             activeCanvas = nil
