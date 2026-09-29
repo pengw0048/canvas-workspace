@@ -186,8 +186,9 @@ final class BrowserService: NSObject, WKNavigationDelegate {
         let content = app.runtime.contentRect(of: o)
         let r = c.camera.toView(content)
         let ls = o.props.logicalSize ?? [1280, 860]
+        // Page zoom keeps the page's own layout width, so the live page matches its preview.
         v.frame = r
-        v.bounds = NSRect(x: 0, y: 0, width: ls[0], height: ls[1])
+        v.pageZoom = r.width / ls[0]
     }
 
     func deactivate() {
@@ -196,7 +197,7 @@ final class BrowserService: NSObject, WKNavigationDelegate {
         let ls = ws.object(id)?.props.logicalSize ?? [1280, 860]
         v.removeFromSuperview()
         v.frame = NSRect(x: 0, y: 0, width: ls[0], height: ls[1])
-        v.bounds = v.frame
+        v.pageZoom = 1
         parking.contentView?.addSubview(v)
         activeCanvas?.window?.makeFirstResponder(activeCanvas)
         refreshSnapshot(id, store: true)

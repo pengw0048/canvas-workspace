@@ -266,6 +266,10 @@ extension CanvasView: NSMenuItemValidation {
     @objc func zoomIn(_ sender: Any?) { camera.zoom(by: 1.25, anchor: CGPoint(x: bounds.midX, y: bounds.midY)); applyCamera() }
     @objc func zoomOut(_ sender: Any?) { camera.zoom(by: 0.8, anchor: CGPoint(x: bounds.midX, y: bounds.midY)); applyCamera() }
     @objc func zoomActual(_ sender: Any?) { var c = camera; c.zoom = 1; setCamera(c) }
+    @objc func captureRegionAction(_ sender: Any?) {
+        if let id = selectedIDs.first(where: { [.app, .browser].contains(ws.object($0)?.kind) }) { beginRegionCapture(id) }
+        else { hud.flash("Select a window or page to capture part of it") }
+    }
     @objc func captureSelection(_ sender: Any?) {
         if let id = selectedIDs.first(where: { [.app, .browser].contains(ws.object($0)?.kind) }) { app.capture(objectID: id, in: self) }
         else { app.admitWindow(nil) }

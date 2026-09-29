@@ -123,6 +123,7 @@ final class Collaboration: NSObject {
     /// One listener per hosted share: its invite code is that share's key, so a code opens only its share.
     var listeners: [ScopeID: NWListener] = [:]
     var listenRetries = 0
+    var grantedAt: [ObjectID: Date] = [:]
     var listenPorts: [ScopeID: UInt16] = [:]
     var listenPort: UInt16? { listenPorts.values.min() }
     var peers: [Peer] = []
@@ -554,22 +555,15 @@ final class Collaboration: NSObject {
             send(to: u, WireMessage("control-denied", ["o": o, "reason": "The host's application window is not connected"]))
             return
         }
-        let a = NSAlert()
-        a.messageText = "\(name) asks to control “\(obj.title)”"
-        a.informativeText = "They will operate this application on your Mac with your account. You can reclaim control at any time with the Reclaim button, by using the application yourself, or with ⌃⌥⌘R."
-        a.addButton(withTitle: "Grant Control")
-        a.addButton(withTitle: "Deny")
-        NSApp.activate(ignoringOtherApps: true)
-        guard a.runModal() == .alertFirstButtonReturn else {
-            send(to: u, WireMessage("control-denied", ["o": o, "reason": "The host declined"]))
-            return
-        }
-        // The requester may have left while the dialog was open; never grant to a departed peer.
+        // Editors of the scope may operate its applications; the host is told and can reclaim at any time.
+        app.activeCanvas?.hud.flash("\(name) is controlling “\(obj.title)”. Use it yourself or press ⌃⌥⌘R to take it back.", seconds: 4)
+        // Never grant to a peer that has already left.
         guard peers.contains(where: { $0.userID == u && !$0.closed }) else { return }
         var arb = arbiters[o] ?? ControlArbiter()
         let (g, release) = arb.grant(to: u)
         arbiters[o] = arb
         releaseHeld(release, object: o)
+        grantedAt[o] = Date()
         if obj.kind == .app, let c = app.activeCanvas { app.runtime.activate(o, in: c) }
         if obj.kind == .browser { _ = app.browsers.webView(for: o) }
         send(to: u, WireMessage("control-granted", ["o": o, "g": "\(g)"]))
@@ -845,6 +839,8 @@ final class Collaboration: NSObject {
     }
 
     func localActivity(on id: ObjectID) {
+        // Bringing the window forward for a new grant is not the host taking over.
+        if let t = grantedAt[id], Date().timeIntervalSince(t) < 2 { return }
         if let a = arbiters[id], let c = a.controller, c != me { reclaim(id, reason: "The host started using the application") }
     }
 

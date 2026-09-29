@@ -112,6 +112,11 @@ final class SceneRenderer {
     private(set) var layers: [ObjectID: ObjectLayer] = [:]
     private(set) var rebase = WPoint(x: 0, y: 0)
     private var pinnedZoom: CGFloat = 0
+    /// Offscreen renders (copy as image) need still pictures; live IOSurfaces do not draw into a bitmap.
+    var offscreen = false
+    func surfacePicture(_ o: CanvasObject) -> Any? {
+        offscreen ? context?.surfaceImage(for: o, pixels: pixelsNeeded(o)) : context?.surfaceContents(for: o, pixels: pixelsNeeded(o))
+    }
     /// Where a camera flight lands; surfaces there stay loaded for the whole flight.
     var flightTarget: WRect?
     var loadedWorld: WRect { flightTarget.map { camera.visibleWorld.union($0) } ?? camera.visibleWorld }
@@ -410,7 +415,7 @@ final class SceneRenderer {
             l.image.frame = full
             l.image.contentsGravity = .resize
             l.bucket = ImageCache.bucket(for: pixelsNeeded(o))
-            l.image.contents = o.props.liveOf != nil ? context?.surfaceContents(for: o, pixels: pixelsNeeded(o)) : context?.image(for: o.props.assetID, pixels: pixelsNeeded(o))
+            l.image.contents = o.props.liveOf != nil ? surfacePicture(o) : context?.image(for: o.props.assetID, pixels: pixelsNeeded(o))
             l.image.backgroundColor = l.image.contents == nil ? NSColor.quaternaryLabelColor.cg(ap) : nil
             if l.image.contents == nil {
                 setLabel(l.label, "Image bytes unavailable", frame: full.insetBy(dx: 8, dy: 8), size: 12, color: Theme.secondaryText)
@@ -524,7 +529,7 @@ final class SceneRenderer {
         let selected = context?.isSelected(o.id) ?? false
         let s = 1 / camera.zoom
         // Far away, a window still shows its picture; the icon card is only for windows without one.
-        if l.detail == .icon, context?.surfaceContents(for: o, pixels: pixelsNeeded(o)) == nil {
+        if l.detail == .icon, surfacePicture(o) == nil {
             configureSurface(l, o, size: size)
             return
         }
@@ -548,7 +553,7 @@ final class SceneRenderer {
         l.image.contentsGravity = .resize
         l.image.backgroundColor = nil
         l.bucket = ImageCache.bucket(for: pixelsNeeded(o))
-        l.image.contents = context?.surfaceContents(for: o, pixels: pixelsNeeded(o))
+        l.image.contents = surfacePicture(o)
         if o.kind == .browser {
             configureAddressBar(l, o, fit: fit, hovered: context?.hoveredID == o.id)
         } else if selected || active || l.detail == .thumbnail {
@@ -630,7 +635,7 @@ final class SceneRenderer {
             l.image.contentsGravity = o.kind == .file ? .resizeAspect : .resizeAspect
             l.image.cornerRadius = o.kind == .file ? 4 : 0
             l.bucket = ImageCache.bucket(for: pixelsNeeded(o))
-            let img: Any? = o.kind == .file ? context?.thumbnail(for: o) : context?.surfaceContents(for: o, pixels: pixelsNeeded(o))
+            let img: Any? = o.kind == .file ? context?.thumbnail(for: o) : surfacePicture(o)
             l.image.contents = img
             l.image.backgroundColor = o.kind == .file ? nil : NSColor.textBackgroundColor.cg(ap)
             if img == nil {

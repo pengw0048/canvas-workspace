@@ -85,6 +85,8 @@ final class CanvasView: NSView, SceneContext {
     let presenceLayer = CALayer()
     var minimap: MinimapView?
     var facepile: FacepileView?
+    var keysLabel: NSTextField?
+    var keysHide: Timer?
     var tool: Tool = .pointer { didSet { toolbar?.update(); window?.invalidateCursorRects(for: self); updateCursor() } }
     var selection: Set<ObjectID> = [] {
         didSet {
@@ -424,6 +426,34 @@ final class CanvasView: NSView, SceneContext {
     }
 
     /// Screen-space selection outlines, handles, marquee, and highlights.
+    /// Typed keys shown at the bottom of a picture-in-picture view, the member-side counterpart of `--keycast`.
+    func showKeys(_ text: String) {
+        guard app.pip else { return }
+        let l = keysLabel ?? {
+            let l = NSTextField(labelWithString: "")
+            l.font = .systemFont(ofSize: 15, weight: .semibold)
+            l.textColor = .white
+            l.alignment = .center
+            l.drawsBackground = true
+            l.backgroundColor = NSColor.black.withAlphaComponent(0.6)
+            l.wantsLayer = true
+            l.layer?.cornerRadius = 9
+            l.layer?.masksToBounds = true
+            addSubview(l)
+            keysLabel = l
+            return l
+        }()
+        l.stringValue = String(text.suffix(24))
+        l.sizeToFit()
+        let w = l.frame.width + 24
+        l.frame = NSRect(x: bounds.midX - w / 2, y: bounds.maxY - 44, width: w, height: 28)
+        l.alphaValue = 1
+        keysHide?.invalidate()
+        keysHide = Timer.scheduledTimer(withTimeInterval: 1.4, repeats: false) { [weak l] _ in
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.25; l?.animator().alphaValue = 0 }
+        }
+    }
+
     /// A fixed caption in the top-left corner (picture-in-picture participants).
     func showCaption(_ text: String) {
         let l = NSTextField(labelWithString: text)
@@ -583,7 +613,14 @@ final class CanvasView: NSView, SceneContext {
             drawCursor(at: camera.toView(lp), name: nil, color: app.collab?.myColor ?? .systemPink, chat: t, arrow: false)
         }
         for (_, c) in remoteCursors {
-            drawCursor(at: camera.toView(c.point), name: c.name, color: c.color, chat: c.chat)
+            let vp = camera.toView(c.point)
+            let edge = safeRect.insetBy(dx: 24, dy: 24)
+            if !edge.contains(vp) {
+                // Out of view: while they chat, pin an arrow to the nearest edge pointing their way, with the message.
+                if let chat = c.chat, !chat.isEmpty { drawEdgeChat(toward: vp, in: edge, name: c.name, color: c.color, chat: chat) }
+                continue
+            }
+            drawCursor(at: vp, name: c.name, color: c.color, chat: c.chat)
             // Remote selection outlines use a dashed collaborator color, distinct from local selection.
             let sel = CAShapeLayer()
             let sp = CGMutablePath()
@@ -671,10 +708,10 @@ final class CanvasView: NSView, SceneContext {
     }
 
     /// The scan effect on the captured region, then the image flies to its new object.
-    func flyCapture(_ img: CGImage, from src: WRect, to id: ObjectID) {
-        guard let o = ws.object(id), let root = layer, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+    func flyCapture(_ img: CGImage, from src: WRect, to id: ObjectID, scan: Bool = true) {
+        guard let o = ws.object(id), let root = layer, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { renderer.layers[id]?.opacity = 1; return }
         let from = camera.toView(src), to = camera.toView(o.geom.rect)
-        guard let fx = scanEffect(from) else { return }
+        guard let fx = scan ? scanEffect(from) : CALayer() else { return }
         let accent = NSColor(calibratedRed: 0.22, green: 0.89, blue: 1, alpha: 1).cgColor
         renderer.layers[id]?.opacity = 0
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in

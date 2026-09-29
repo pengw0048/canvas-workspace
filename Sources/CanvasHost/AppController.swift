@@ -20,6 +20,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let windowed: Bool
     /// `--pip`: a participant whose view floats in a screen corner, for recordings.
     let pip = CommandLine.arguments.contains("--pip")
+    var keycast: Keycast?
     var session: WorkspaceSession!
     var workspace: Workspace { session.workspace }
     var identity: Identity!
@@ -102,6 +103,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let quiet = CommandLine.arguments.contains("--background") || CommandLine.arguments.contains("--hidden") || pip
         if !quiet { NSApp.activate(ignoringOtherApps: true) }
         if CommandLine.arguments.contains("--hidden") || pip { NSApp.setActivationPolicy(.accessory) }
+        if CommandLine.arguments.contains("--keycast") { keycast = Keycast() }
     }
 
     func fail(_ error: Error, _ dir: URL) {
@@ -647,6 +649,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             item(m, "Group", #selector(CanvasView.groupSelection(_:)), "g")
             item(m, "Ungroup", #selector(CanvasView.ungroupSelection(_:)), "g", [.command, .shift])
             item(m, "Capture", #selector(CanvasView.captureSelection(_:)), "c", [.command, .shift])
+            item(m, "Capture Region…", #selector(CanvasView.captureRegionAction(_:)), "r", [.command, .shift])
             m.addItem(.separator())
             item(m, "Find…", #selector(showSearch(_:)), "f", target: self)
         }

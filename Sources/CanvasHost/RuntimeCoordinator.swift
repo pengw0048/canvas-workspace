@@ -864,7 +864,9 @@ final class RuntimeCoordinator: NSObject {
         let vis = c.camera.visibleWorld
         for id in liveObjects {
             guard let o = ws.object(id) else { continue }
-            app.capture.setLiveBudget(id, visible: vis.intersects(o.geom.bounds), pixels: c.renderer.pixelsNeeded(o))
+            // Members see shared windows at their own zoom, so those streams ignore the host's view.
+            let shared = app.collab?.liveShared.contains(id) == true
+            app.capture.setLiveBudget(id, visible: shared || vis.intersects(o.geom.bounds), pixels: shared ? 1600 : c.renderer.pixelsNeeded(o))
         }
     }
 

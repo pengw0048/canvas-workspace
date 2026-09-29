@@ -274,6 +274,16 @@ final class Automation {
                 var e = RemoteInputEvent(kind: RemoteInputEvent.Kind(rawValue: args[1]) ?? .move)
                 e.x = Double(args[2]) ?? 0; e.y = Double(args[3]) ?? 0
                 if args.count > 4 { e.text = args[4...].joined(separator: " ") }
+                if e.kind == .text { c.showKeys(e.text ?? "") }
+                if e.kind == .key {
+                    // input <id> key 0 0 <keyCode>: a full press and release.
+                    c.showKeys([36: "↩", 53: "esc", 48: "⇥"][Int(e.text ?? "") ?? 0] ?? "key")
+                    e.keyCode = Int(e.text ?? "") ?? 36
+                    e.text = nil
+                    e.keyDown = true
+                    app.collab?.sendInput(e, to: args[0])
+                    e.keyDown = false
+                }
                 app.collab?.sendInput(e, to: args[0])
                 return json(["ok": true])
             case "rawinput":
@@ -490,6 +500,7 @@ final class Automation {
                 Timer.scheduledTimer(withTimeInterval: 1 / cps, repeats: true) { t in
                     guard !chars.isEmpty, let cur = ws.object(id) else { t.invalidate(); return }
                     let ch = String(chars.removeFirst())
+                    c.showKeys((c.keysLabel?.alphaValue ?? 0) > 0 ? (c.keysLabel?.stringValue ?? "") + ch : ch)
                     try? ws.spliceText(id, baseHeads: ws.heads(cur.scope), start: cur.text.unicodeScalars.count, delete: 0, insert: ch)
                 }
                 return json(["ok": true])
@@ -503,6 +514,7 @@ final class Automation {
                     guard !rest.isEmpty else { t.invalidate(); return }
                     shown.append(rest.removeFirst())
                     c.setChat(shown)
+                    c.showKeys(shown)
                 }
                 return json(["ok": true])
             case "identity":

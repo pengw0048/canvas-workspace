@@ -72,6 +72,7 @@ final class PasteboardService: NSObject {
         let ctxProvider = app.activeCanvas
         r.context = ctxProvider
         r.backingScale = s
+        r.offscreen = true
         // Temporary workspace view limited to the selection.
         let root = CALayer()
         root.frame = CGRect(x: 0, y: 0, width: b.w, height: b.h)

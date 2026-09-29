@@ -202,10 +202,16 @@ final class CaptureService {
             n.props.name = "Capture · \(o.props.appName ?? o.title) · \(t)"
             let nid = try ws.create(n, name: region == nil ? "Capture window" : "Capture region", assets: [a])
             c.selection = [nid]
-            if !c.camera.visibleWorld.intersects(n.geom.bounds) { c.reveal(nid, highlight: false) }
+            let r = region ?? CGRect(x: 0, y: 0, width: 1, height: 1)
+            let src = WRect(x: content.x + r.minX * content.w, y: content.y + r.minY * content.h, w: rw, h: rh)
+            if c.camera.visibleWorld.contains(n.geom.bounds) { c.flyCapture(img, from: src, to: nid) }
             else {
-                let r = region ?? CGRect(x: 0, y: 0, width: 1, height: 1)
-                c.flyCapture(img, from: WRect(x: content.x + r.minX * content.w, y: content.y + r.minY * content.h, w: rw, h: rh), to: nid)
+                // Pull back until source and destination are both in view, then fly.
+                c.scanEffect(c.camera.toView(src))
+                var cam = c.camera
+                cam.fit(src.union(n.geom.bounds), margin: 120, maxZoom: c.camera.zoom)
+                c.renderer.layers[nid]?.opacity = 0
+                c.setCamera(cam, animated: true, record: true, duration: 0.7) { [weak c] in c?.flyCapture(img, from: src, to: nid, scan: false) }
             }
             if case .failed = ws.saveState { c.hud.flash("Captured, but not saved yet: \(ws.saveState.label)", seconds: 5) }
             else { c.hud.flash(region == nil ? "Captured the window" : "Captured the region") }

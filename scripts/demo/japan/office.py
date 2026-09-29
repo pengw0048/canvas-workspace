@@ -38,6 +38,7 @@ for title, items in days:
     d.add_heading(title, 2)
     for it in items:
         d.add_paragraph(it, style="List Bullet")
+d.add_page_break()
 d.add_heading("行程图", 2)
 d.add_paragraph("")
 for p in d.paragraphs:

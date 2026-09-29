@@ -80,6 +80,51 @@ extension CanvasView: NSTextFieldDelegate {
         }
     }
 
+    /// A collaborator's chat while their pointer is out of view: an arrow on the nearest edge and the bubble beside it.
+    func drawEdgeChat(toward p: CGPoint, in edge: CGRect, name: String, color: NSColor, chat: String) {
+        let c = CGPoint(x: edge.midX, y: edge.midY)
+        let d = CGPoint(x: p.x - c.x, y: p.y - c.y)
+        // Where the line from the center toward the pointer leaves the edge rectangle.
+        let t = min(abs(d.x) > 0 ? (edge.width / 2) / abs(d.x) : .infinity, abs(d.y) > 0 ? (edge.height / 2) / abs(d.y) : .infinity)
+        let q = CGPoint(x: c.x + d.x * t, y: c.y + d.y * t)
+        let angle = atan2(d.y, d.x)
+        let arrow = CAShapeLayer()
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 12, y: 0))
+        path.addLine(to: CGPoint(x: -8, y: -8))
+        path.addLine(to: CGPoint(x: -4, y: 0))
+        path.addLine(to: CGPoint(x: -8, y: 8))
+        path.closeSubpath()
+        arrow.path = path
+        arrow.fillColor = color.cgColor
+        arrow.strokeColor = NSColor.white.cgColor
+        arrow.lineWidth = 1.2
+        arrow.position = q
+        arrow.setAffineTransform(CGAffineTransform(rotationAngle: angle))
+        presenceLayer.addSublayer(arrow)
+        // The bubble sits inward from the arrow so it stays on screen.
+        let text = NSMutableAttributedString(string: name, attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.white])
+        text.append(NSAttributedString(string: "\n" + chat, attributes: [.font: Self.chatFont, .foregroundColor: NSColor.white]))
+        let r = text.boundingRect(with: CGSize(width: 260, height: 400), options: [.usesLineFragmentOrigin, .usesFontLeading])
+        let size = CGSize(width: ceil(r.width) + 20, height: ceil(r.height) + 12)
+        var o = CGPoint(x: q.x - size.width / 2 - cos(angle) * (size.width / 2 + 18), y: q.y - size.height / 2 - sin(angle) * (size.height / 2 + 18))
+        o.x = min(max(o.x, edge.minX), edge.maxX - size.width)
+        o.y = min(max(o.y, edge.minY), edge.maxY - size.height)
+        let label = TextLayer()
+        label.attributed = text
+        label.inset = CGSize(width: 10, height: 6)
+        label.backgroundColor = color.cgColor
+        label.cornerRadius = 12
+        label.shadowColor = NSColor.black.cgColor
+        label.shadowOpacity = 0.25
+        label.shadowRadius = 6
+        label.shadowOffset = CGSize(width: 0, height: 2)
+        label.frame = CGRect(origin: o, size: size)
+        label.contentsScale = renderer.backingScale
+        label.setNeedsDisplay()
+        presenceLayer.addSublayer(label)
+    }
+
     /// The standard macOS arrow: black with a white outline.
     func drawSystemArrow(at p: CGPoint) {
         let a = CAShapeLayer()
