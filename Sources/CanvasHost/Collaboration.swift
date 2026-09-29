@@ -692,29 +692,42 @@ final class Collaboration: NSObject {
             p.send(WireMessage("transfer-result", ["ok": err == nil ? "1" : "0", "reason": err ?? "Pasted \(text.count) characters into the application"]))
         case "transfer-file":
             let name = (m["name"] ?? "Transferred file").replacingOccurrences(of: "/", with: "-")
-            // Downloads can be refused by privacy settings; the workspace folder is the fallback.
-            var dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].appendingPathComponent("Canvas Workspace Transfers", isDirectory: true)
-            if (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) == nil {
-                Diagnostics.record("transfer", "Downloads not writable; using the workspace folder")
-                dir = app.dataDir.appendingPathComponent("received", isDirectory: true)
-            }
-            do {
-                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                let dest = dir.appendingPathComponent(name)
-                try m.payload.write(to: dest, options: .atomic)
-                guard SHA256.hash(data: (try? Data(contentsOf: dest)) ?? Data()).description == SHA256.hash(data: m.payload).description else {
-                    throw CanvasError.storage("verification failed")
+            let payload = m.payload
+            let fallback = app.dataDir.appendingPathComponent("received", isDirectory: true)
+            // File work runs off the main thread: a privacy prompt for Downloads must not freeze the host.
+            DispatchQueue.global(qos: .userInitiated).async {
+                let fm = FileManager.default
+                var dir = fm.urls(for: .downloadsDirectory, in: .userDomainMask)[0].appendingPathComponent("Canvas Workspace Transfers", isDirectory: true)
+                if (try? fm.createDirectory(at: dir, withIntermediateDirectories: true)) == nil { dir = fallback }
+                let result: Result<URL, Error> = Result {
+                    try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+                    let dest = dir.appendingPathComponent(name)
+                    try payload.write(to: dest, options: .atomic)
+                    guard (try? Data(contentsOf: dest)).map({ SHA256.hash(data: $0) == SHA256.hash(data: payload) }) == true else {
+                        throw CanvasError.storage("verification failed")
+                    }
+                    return dest
                 }
-                pb.clearContents()
-                pb.writeObjects([dest as NSURL])
-                let cc = pb.changeCount
-                let err = pasteIntoApp()
-                restoreLater(cc)
-                Diagnostics.record("transfer", "file \(m.payload.count) bytes to \(dir.lastPathComponent): \(err ?? "pasted")")
-                p.send(WireMessage("transfer-result", ["ok": "1", "reason": "Delivered \(name) (\(m.payload.count) bytes) to the host" + (err == nil ? " and pasted it into the application" : "; paste failed: \(err!)")]))
-            } catch {
-                Diagnostics.record("transfer", "file failed: \(error)")
-                p.send(WireMessage("transfer-result", ["ok": "0", "reason": "File transfer failed: \(error)"]))
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let dest):
+                        // The grant may have ended while the file was being written.
+                        guard let arb = self.arbiters[o], arb.controller == p.userID else {
+                            p.send(WireMessage("transfer-result", ["ok": "1", "reason": "Delivered \(name) to the host; not pasted because control ended"]))
+                            return
+                        }
+                        pb.clearContents()
+                        pb.writeObjects([dest as NSURL])
+                        let cc = pb.changeCount
+                        let err = pasteIntoApp()
+                        restoreLater(cc)
+                        Diagnostics.record("transfer", "file \(payload.count) bytes to \(dest.deletingLastPathComponent().lastPathComponent): \(err ?? "pasted")")
+                        p.send(WireMessage("transfer-result", ["ok": "1", "reason": "Delivered \(name) (\(payload.count) bytes) to the host" + (err == nil ? " and pasted it into the application" : "; paste failed: \(err!)")]))
+                    case .failure(let error):
+                        Diagnostics.record("transfer", "file failed: \(error)")
+                        p.send(WireMessage("transfer-result", ["ok": "0", "reason": "File transfer failed: \(error)"]))
+                    }
+                }
             }
         case "copy-from-app":
             let before = pb.changeCount
