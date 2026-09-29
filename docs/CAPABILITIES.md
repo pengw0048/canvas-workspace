@@ -64,7 +64,7 @@ exercised end to end. **Simulated** — exercised, but with a stand-in noted in 
 | First activation click consumed by host; zoom never grants input | Verified | The first click selected the surface; only the double-click activated it; TextEdit content was untouched. |
 | App menus reflect the active app | Verified | Menu bar showed TextEdit's menus while active. |
 | Dialogs, sheets, palettes of the active app | Verified (Save As sheet, RTFD conversion alert) | Palettes not tested. |
-| IME input | Verified (canvas note) / Unverified (active app) | Japanese romaji input showed marked text and candidates and committed once. The first run exposed an editor re-entrancy crash (stack overflow, duplicated text); fixed and re-run with the real IME. |
+| IME input | Verified (canvas note, active TextEdit) | Japanese romaji input showed marked text and candidates and committed once, both in a canvas note and in the active TextEdit window. The first run exposed an editor re-entrancy crash (stack overflow, duplicated text); fixed and re-run with the real IME. |
 | A second unrelated application | Verified | Preview window admitted and activated at 1:1; Finder window admitted and used as a drop target. |
 | Surviving runtime reconnect after host restart (pid + window number + bundle; document check) | Verified | Host killed and relaunched; TextEdit window rebound, no duplicate. |
 | Reopen source by document path when the window is gone | Unverified | Document path comes from `AXDocument`; it now follows app-side renames while connected (found when TextEdit converted `.rtf` to `.rtfd`). |
@@ -75,7 +75,7 @@ exercised end to end. **Simulated** — exercised, but with a stand-in noted in 
 | Multiple displays with independent cameras | Unverified | One display on the test Mac. |
 | Transformed input into arbitrary windows at fractional scale | Unsupported | The hybrid strategy delivers input only to the real window at 1:1. |
 | Dirty-state detection for ordinary apps | Unsupported | Reported as unknown. |
-| Adapter session restoration | Unverified | A generic text-document adapter saves the document path, selection, and first visible character over AX while connected; on reopen it restores them only if the file is unchanged since, and reports "Adapter session". No app-specific adapters. |
+| Adapter session restoration | Verified (TextEdit) | A generic text-document adapter saves the document path, selection, and first visible character over AX while connected. The window was closed through its normal close flow, reopened from the canvas, bound to the new window, and its selection (15, 5) restored; depth reported "Adapter session". It skips restoring when the file changed since. No app-specific adapters. |
 
 ## Material transfer (package C)
 
@@ -90,7 +90,7 @@ exercised end to end. **Simulated** — exercised, but with a stand-in noted in 
 | Paste composition into a real document app | Verified | Real ⌘C on the canvas, real ⌘V in TextEdit; saved `deliverable.rtfd` contains the annotated capture (evidence). |
 | Native drag out through the export grip | Verified (text into TextEdit, PNG file promise into Finder) | Hovering over the app surface for 0.5 s brought the real window there; the note text landed in report.txt, and a valid 821×343 PNG appeared in the Finder folder. |
 | Canceled drag | Verified | Escape during a content drag left the document and canvas unchanged. |
-| Drag in | Verified (file from Finder) / Unverified (text, images, URLs, promises) | Dropping sample.png from Finder created a file reference; the file stayed in its folder. A text drag from TextEdit did not start in the automated run (selection setup), so text drag-in remains unverified. |
+| Drag in | Verified (file, text, URL) / Unverified (image data, file promises) | From Finder a file became a reference (file untouched); a selected line from TextEdit became a text object; a selected URL became a reference page. |
 | Frozen capture never changes; live view follows its source; freeze creates a new capture | Verified (frozen/live coexist) | The fixture app did not reload the edited file, so live updates were seen as new frames only. |
 
 ## Lifecycle and recovery (package D)
@@ -120,7 +120,7 @@ and identities on the same Mac, connected over loopback TLS-PSK. **Simulated:** 
 | Revoke member → future access denied, member keeps a private recovered copy | Verified | Bob's shared scope was removed, its 12 objects kept as private copies; rejoining with the code and joining with a wrong code were both refused. |
 | Shared browser runtime: single controller, generation tokens, stale/replayed events rejected, reclaim | Verified | Controller click incremented the page counter; generation 0 and post-reclaim generation 1 events rejected. Grant was issued through automation instead of the host's dialog. |
 | Shared native app: live frames, grant, remote input, local takeover reclaim, stale grants | Verified | Bob (second process) saw TextEdit live ("Live from host"), clicked and typed into the host's real TextEdit document, and lost control whenever the host used the app locally; his later and replayed events were rejected. A Dock-layer target-check bug found on the way was fixed. When the host quit, Bob kept the last published frame with "Host offline". |
-| Explicit transfers: controller text/file into the remote app, copy from the remote app | Unverified | Host restores its own clipboard afterwards unless it changed meanwhile. |
+| Explicit transfers: controller text/file into the remote app, copy from the remote app | Not working yet | In the last run neither the text nor the file arrived in the host app, and copy-from-app returned nothing; the host's clipboard was left unchanged. Shortcut injection moved to the HID path, Downloads now has a fallback folder, and outcomes are logged; needs a re-run. |
 | Reference page mode (per-user rendering, captures) | Verified | example.com loaded in the embedded session, labeled "as rendered for you", and captured to a frozen image. |
 | Provider-collaborative document mode | Verified (labeling, no embedding) / Unverified (two provider accounts) | The object opens the link in each person's own browser; nothing is embedded and no credentials are copied. |
 | Purpose-built adapters, scroll-follow | Not implemented | |
@@ -150,7 +150,8 @@ same scene used 825 MB, and three live surfaces used 100 % CPU and 1.2 GB.
 
 ## Next steps
 
-1. In a notified input window: drag in text, images, and URLs; IME in an active app.
-2. Explicit remote transfers (controller text/file into the remote app, copy from it).
+1. In a notified input window: re-run explicit remote transfers; drag in image data and file
+   promises.
+2. Multi-display behavior on a machine with two displays.
 3. Performance with three live surfaces and two participants.
 4. Workspace history preview (§8.5), multiple workspaces.
