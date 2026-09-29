@@ -55,15 +55,73 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         do {
             try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
             identity = loadIdentity()
-            session = try WorkspaceSession(directory: dataDir, user: identity.id)
         } catch {
-            let a = NSAlert()
-            a.messageText = "The workspace could not be opened"
-            a.informativeText = "\(error)\n\nData folder: \(dataDir.path)"
-            a.runModal()
-            NSApp.terminate(nil)
+            fail(error, dataDir)
             return
         }
+        let last = workspaceRegistry().first { $0.id == UserDefaults.standard.string(forKey: "lastWorkspace.\(profile)") }
+        guard openWorkspace(at: last.map { directory(for: $0) } ?? dataDir) else { return }
+        buildMenu()
+        hotKeys = HotKeys()
+        hotKeys.register(keyCode: UInt32(kVK_Space), modifiers: UInt32(controlKey | optionKey)) { [weak self] in self?.hostCommand() }
+        hotKeys.register(keyCode: UInt32(kVK_ANSI_R), modifiers: UInt32(controlKey | optionKey | cmdKey)) { [weak self] in self?.emergencyReclaim() }
+        NotificationCenter.default.addObserver(self, selector: #selector(screensChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        if ProcessInfo.processInfo.environment["CANVAS_AUTOMATION"] != nil || CommandLine.arguments.contains("--automation") {
+            automation = Automation(app: self)
+        }
+        if !CommandLine.arguments.contains("--background") { NSApp.activate(ignoringOtherApps: true) }
+    }
+
+    func fail(_ error: Error, _ dir: URL) {
+        let a = NSAlert()
+        a.messageText = "The workspace could not be opened"
+        a.informativeText = "\(error)\n\nData folder: \(dir.path)"
+        a.runModal()
+        if session == nil { NSApp.terminate(nil) }
+    }
+
+    // MARK: Workspaces
+
+    struct WorkspaceEntry: Codable { var id: String; var name: String; var folder: String? }
+
+    var registryURL: URL { dataDir.appendingPathComponent("workspaces.json") }
+
+    /// The default workspace lives at the profile root; others in `workspaces/<id>`.
+    func workspaceRegistry() -> [WorkspaceEntry] {
+        var list = (try? JSONDecoder().decode([WorkspaceEntry].self, from: Data(contentsOf: registryURL))) ?? []
+        if !list.contains(where: { $0.folder == nil }) { list.insert(WorkspaceEntry(id: "default", name: "Workspace", folder: nil), at: 0) }
+        return list
+    }
+
+    func saveRegistry(_ l: [WorkspaceEntry]) { try? JSONEncoder().encode(l).write(to: registryURL, options: .atomic) }
+
+    func directory(for e: WorkspaceEntry) -> URL {
+        e.folder.map { dataDir.appendingPathComponent("workspaces", isDirectory: true).appendingPathComponent($0, isDirectory: true) } ?? dataDir
+    }
+
+    var currentWorkspaceEntry: WorkspaceEntry? {
+        workspaceRegistry().first { directory(for: $0).standardizedFileURL == session?.store.directory.standardizedFileURL }
+    }
+
+    /// Opens a workspace; the previous one is saved and its windows are left where they are.
+    @discardableResult
+    func openWorkspace(at dir: URL) -> Bool {
+        let newSession: WorkspaceSession
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            newSession = try WorkspaceSession(directory: dir, user: identity.id)
+        } catch { fail(error, dir); return false }
+        if session != nil {
+            workspace.flush()
+            for c in canvases { personalViewChanged(c, force: true) }
+            runtime.shutdown()
+            runtime.stop()
+            files.stop()
+            collab?.stop()
+            inspector?.panel.orderOut(nil)
+            history?.panel.orderOut(nil)
+        }
+        session = newSession
         _ = session.store.collectOrphanAssets()
         images = ImageCache(store: session.store)
         capture = CaptureService(app: self)
@@ -74,17 +132,44 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
         collab = Collaboration(app: self)
         workspace.onChange = { [weak self] ids in self?.workspaceChanged(ids) }
         workspace.onSaveState = { [weak self] s in self?.saveStateChanged(s) }
-        buildMenu()
         buildWindows()
-        hotKeys = HotKeys()
-        hotKeys.register(keyCode: UInt32(kVK_Space), modifiers: UInt32(controlKey | optionKey)) { [weak self] in self?.hostCommand() }
-        hotKeys.register(keyCode: UInt32(kVK_ANSI_R), modifiers: UInt32(controlKey | optionKey | cmdKey)) { [weak self] in self?.emergencyReclaim() }
-        NotificationCenter.default.addObserver(self, selector: #selector(screensChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
-        if ProcessInfo.processInfo.environment["CANVAS_AUTOMATION"] != nil || CommandLine.arguments.contains("--automation") {
-            automation = Automation(app: self)
-        }
         runtime.startupScan()
-        if !CommandLine.arguments.contains("--background") { NSApp.activate(ignoringOtherApps: true) }
+        if let e = currentWorkspaceEntry {
+            UserDefaults.standard.set(e.id, forKey: "lastWorkspace.\(profile)")
+            for w in windows { w.title = e.name }
+        }
+        return true
+    }
+
+    func newWorkspace() {
+        let a = NSAlert()
+        a.messageText = "New workspace"
+        a.informativeText = "A separate canvas with its own objects, sharing, and history."
+        let tf = NSTextField(string: "")
+        tf.placeholderString = "Name"
+        tf.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        a.accessoryView = tf
+        a.addButton(withTitle: "Create")
+        a.addButton(withTitle: "Cancel")
+        a.window.initialFirstResponder = tf
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        createWorkspace(named: tf.stringValue.isEmpty ? "Untitled workspace" : tf.stringValue)
+    }
+
+    @discardableResult
+    func createWorkspace(named name: String) -> WorkspaceEntry {
+        var l = workspaceRegistry()
+        let e = WorkspaceEntry(id: newID(), name: name, folder: newID())
+        l.append(e)
+        saveRegistry(l)
+        openWorkspace(at: directory(for: e))
+        return e
+    }
+
+    func switchWorkspace(_ id: String) {
+        guard let e = workspaceRegistry().first(where: { $0.id == id }), e.id != currentWorkspaceEntry?.id else { return }
+        openWorkspace(at: directory(for: e))
+        activeCanvas?.hud.flash("Opened “\(e.name)”")
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -403,6 +488,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func workspaceMenu() -> NSMenu {
         let m = NSMenu()
         m.autoenablesItems = false
+        m.sub("Workspaces") { wm in
+            for e in self.workspaceRegistry() {
+                let i = ActionItem(e.name) { self.switchWorkspace(e.id) }
+                i.state = e.id == self.currentWorkspaceEntry?.id ? .on : .off
+                wm.addItem(i)
+            }
+            wm.addItem(.separator())
+            wm.add("New Workspace…") { self.newWorkspace() }
+        }
         m.add("Search…  ⌘F") { self.showSearch(nil) }
         m.add("Back  ⌘[") { self.activeCanvas?.navigateBack() }
         m.add("Fit all  ⇧1") { self.activeCanvas?.fitAll() }

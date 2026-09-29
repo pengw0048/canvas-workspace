@@ -20,6 +20,8 @@ final class FileService {
 
     var ws: Workspace { app.workspace }
 
+    func stop() { timer?.invalidate() }
+
     /// Resolves the file through its bookmark first (survives moves and renames), then its path.
     func resolvedURL(for o: CanvasObject) -> URL? {
         guard var s = app.session.source(o.props.sourceID) else { return nil }

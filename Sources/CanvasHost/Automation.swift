@@ -386,6 +386,13 @@ final class Automation {
             case "historyrestore":
                 app.history?.restore()
                 return json(["ok": true])
+            case "newworkspace":
+                return json(["id": app.createWorkspace(named: arg).id])
+            case "workspaces":
+                return json(["list": app.workspaceRegistry().map { "\($0.id)|\($0.name)" }, "current": app.currentWorkspaceEntry?.id ?? ""])
+            case "switch":
+                app.switchWorkspace(args[0])
+                return json(["current": app.currentWorkspaceEntry?.id ?? ""])
             case "identity":
                 return json(["id": app.identity.id, "name": app.identity.name])
             case "flush":

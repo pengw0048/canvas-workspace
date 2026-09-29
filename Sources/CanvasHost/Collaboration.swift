@@ -1023,8 +1023,12 @@ final class Collaboration: NSObject {
     func stop() {
         reclaimAll(reason: "The host is closing")
         for p in peers { p.close() }
+        upstream?.onClose = nil
         upstream?.close()
         listener?.cancel()
+        presenceTimer?.invalidate()
+        reclaimTimer?.invalidate()
+        browser?.cancel()
     }
 
     func removeMember(_ user: String) {

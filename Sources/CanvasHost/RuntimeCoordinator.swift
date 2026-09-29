@@ -791,6 +791,11 @@ final class RuntimeCoordinator: NSObject {
         recoverWindowsOntoDisplays(silent: true)
     }
 
+    func stop() {
+        watchTimer?.invalidate()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
+
     func shutdown() {
         for id in liveObjects { app.capture.stopLive(id) }
         returnPanel?.orderOut(nil)
