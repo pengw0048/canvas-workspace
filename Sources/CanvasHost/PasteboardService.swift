@@ -167,11 +167,11 @@ final class PasteboardService: NSObject {
                 if let img = app.runtime.surfaceImage(for: objs[0]), let png = pngData(img, maxPixels: 20_000_000) { item.setData(png, forType: .png) }
             } else {
                 // Mixed composition: the composed visual is the default paste into image-capable apps.
-                guard let img = renderComposition(ids), let png = pngData(img, maxPixels: 60_000_000) else {
+                // It is rendered only when a destination asks, from a snapshot taken now.
+                guard let provider = CompositionProvider(snapshotOf: ids, service: self) else {
                     throw CanvasError.permission("The selection could not be rendered")
                 }
-                item.setData(png, forType: .png)
-                item.setData(pdfData(img), forType: .pdfType)
+                item.setDataProvider(provider, forTypes: [.png, .pdfType])
                 if objs.count == 1, objs[0].kind == .app, let s = app.session.source(objs[0].props.sourceID), let p = s.documentPath {
                     item.setString(URL(fileURLWithPath: p).absoluteString, forType: .URL)
                 }
@@ -317,6 +317,44 @@ extension SceneRenderer {
         }
         worldLayer.sublayers = sub
         CATransaction.commit()
+    }
+}
+
+/// Deferred clipboard delivery of a composed image. The snapshot keeps the copied state even if the
+/// canvas changes before the paste; asset bytes stay in the content-addressed store.
+final class CompositionProvider: NSObject, NSPasteboardItemDataProvider {
+    static var alive: [CompositionProvider] = []
+    let snapshot: Workspace
+    unowned let service: PasteboardService
+    var rendered: CGImage?
+
+    init?(snapshotOf ids: [ObjectID], service: PasteboardService) {
+        guard let sel = service.ws.portable(ids) else { return nil }
+        let doc = ScopeDocument(id: Scope.privateID)
+        guard (try? doc.initializeSchema(title: "Clipboard")) != nil else { return nil }
+        snapshot = Workspace(workspaceID: service.ws.workspaceID, user: service.ws.user)
+        snapshot.addScope(doc)
+        self.service = service
+        super.init()
+        let objs = snapshot.instantiate(sel, topLeft: WPoint(x: sel.bounds.x, y: sel.bounds.y))
+        guard (try? snapshot.perform("Snapshot", recordUndo: false, { tx in for o in objs { tx.create(o) } })) != nil else { return nil }
+        Self.alive.append(self)
+        if Self.alive.count > 4 { Self.alive.removeFirst() }
+    }
+
+    func image() -> CGImage? {
+        if rendered == nil { rendered = service.renderComposition(snapshot.live.map(\.id), in: snapshot) }
+        return rendered
+    }
+
+    func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
+        guard let img = image() else { Diagnostics.record("clipboard", "deferred render failed"); return }
+        if type == .png, let d = pngData(img, maxPixels: 60_000_000) { item.setData(d, forType: .png) }
+        if type == .pdfType { item.setData(service.pdfData(img), forType: .pdfType) }
+    }
+
+    func pasteboardFinishedWithDataProvider(_ pasteboard: NSPasteboard) {
+        Self.alive.removeAll { $0 === self }
     }
 }
 
